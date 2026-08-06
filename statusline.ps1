@@ -1,0 +1,235 @@
+﻿# ClaudeCodeCLI-TokenBar — Claude Code statusline (Windows / PowerShell)
+#
+#   line 1  [CAVEMAN] [PONYTAIL] | Opus 5 | my-project | main* | $8.10
+#   line 2  ctx ███▊░░░░░░  38% · 5h ██████▌░░░  66% ↻1h46m · 7d █████▊░░░░  58% ↻5d5h ×2.3
+#
+# The three bars are coloured by three different rules on purpose:
+#   ctx  absolute %, thresholds tiered by the model's context window size
+#   5h   absolute %, five fixed bands
+#   7d   burn *pace* against the weekly allowance, with an absolute floor
+#
+# Payload schema verified against Claude Code 2.1.223.
+
+# ---- toggles: $true shows, $false hides ----------------------------------
+$show = @{
+    caveman   = $true    # [CAVEMAN:FULL] badge, if the caveman plugin is installed
+    ponytail  = $true    # [PONYTAIL]     badge, if the ponytail plugin is installed
+    model     = $true    # Opus 5
+    dir       = $true    # current directory name
+    branch    = $true    # main*  (* = uncommitted changes)
+    context   = $true    # ctx bar
+    quota5h   = $true    # 5h bar
+    quota7d   = $true    # 7d bar
+    pace      = $true    # ×2.1 multiplier next to the 7d bar
+    cost      = $true    # $8.10 — only at or above $costFloor
+}
+$barWidth  = 10          # cells per bar; shared so the three compare by eye
+$costFloor = 5.0         # hide cost below this many USD (0 = always show)
+
+# 256-colour palette. sev ranks severity so two rules can be compared and the
+# worse one wins; without it there'd be no way to order "yellow" against "red".
+$GREEN = 108; $AMBER = 179; $YELLOW = 226; $RED = 196; $PURPLE = 201
+$CTRACK = 240; $DIM = 240
+
+# ---- ctx: thresholds tiered by window size ------------------------------
+# A flat 20%-is-yellow rule punishes small windows: 20% of 200k is 40k, which is
+# nothing. First tier whose maxWindow covers the model's window wins.
+$ctxTiers = @(
+    @{ maxWindow =  200000; amber = 50; red = 70; purple = 85 }
+    @{ maxWindow =  500000; amber = 40; red = 60; purple = 80 }
+    @{ maxWindow =  800000; amber = 30; red = 55; purple = 80 }
+    @{ maxWindow = [double]::MaxValue; amber = 20; red = 50; purple = 80 }
+)
+# Gradient inserted between the amber and red thresholds, evenly spaced. On a 1M
+# window (amber 20, red 50) this lands on exactly 20/25/30/35/40/45.
+$ctxGradient = @(226, 220, 214, 208, 202, 203)
+
+# ---- 5h: five fixed bands ------------------------------------------------
+# No pace rule here: the window is only 5 hours, work arrives in bursts, and a
+# pace figure over that span jitters too much to read.
+$ramp5h = @(
+    @{ at =  0; color = $GREEN;  sev = 0 }
+    @{ at = 40; color = $AMBER;  sev = 1 }
+    @{ at = 60; color = $YELLOW; sev = 2 }
+    @{ at = 80; color = $RED;    sev = 3; bold = $true }
+    @{ at = 95; color = $PURPLE; sev = 4; bold = $true; mark = $true }
+)
+
+# ---- 7d: pace against the weekly allowance -------------------------------
+# The payload carries no per-day breakdown, so "used more than 2x a day's share"
+# is measured over the whole elapsed window instead of a rolling 24h:
+#   pace = used% / (elapsed_fraction * 100)
+# pace 1.0 means dead on the 1/7-per-day allowance. Steadier than a 24h snapshot,
+# since one heavy day doesn't misreport the week.
+$rampPace = @(
+    @{ at = 0.0; color = $GREEN;  sev = 0 }                             # on or under
+    @{ at = 1.0; color = $YELLOW; sev = 2 }                             # over 1x
+    @{ at = 2.0; color = $RED;    sev = 3; bold = $true }               # over 2x
+    @{ at = 3.0; color = $PURPLE; sev = 4; bold = $true; mark = $true } # over 3x
+)
+# Pace lies at the end of a window: 95% used on day 6.9 is pace 0.97 — "green"
+# while almost nothing is left. This floor is the worse-case override.
+$floor7d = @(
+    @{ at =  0; color = $GREEN;  sev = 0 }
+    @{ at = 85; color = $RED;    sev = 3; bold = $true }
+    @{ at = 95; color = $PURPLE; sev = 4; bold = $true; mark = $true }
+)
+$weekSeconds   = 7 * 24 * 3600   # assumed window length; resets_at is its end
+$paceGraceFrac = 0.10            # below this much elapsed the divisor is too
+                                 # small to trust — 3% used in the first hour
+                                 # would compute as 5x and flash purple
+# -------------------------------------------------------------------------
+
+$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+$raw = [Console]::In.ReadToEnd()
+if ($env:CLAUDE_STATUSLINE_DEBUG -eq '1') {
+    $raw | Set-Content -LiteralPath (Join-Path $env:TEMP 'claude-statusline-payload.json') -Encoding utf8
+}
+$j = $raw | ConvertFrom-Json
+
+$Esc = [char]27
+function C($code, $text)    { "$Esc[38;5;${code}m$text$Esc[0m" }
+function Bold($code, $text) { "$Esc[1;38;5;${code}m$text$Esc[0m" }
+function Paint($step, $text) { if ($step.bold) { Bold $step.color $text } else { C $step.color $text } }
+
+# Highest matching `at` wins, so ramps must stay sorted ascending.
+function PickStep($ramp, $v) {
+    $step = $ramp[0]
+    foreach ($s in $ramp) { if ($v -ge $s.at) { $step = $s } }
+    return $step
+}
+function Worse($a, $b) { if ($b.sev -gt $a.sev) { $b } else { $a } }
+
+# Build the ctx ramp for this model's window: green, then the gradient spread
+# evenly across [amber, red), then red, then purple.
+function CtxRamp($windowSize) {
+    $t = $null
+    foreach ($tier in $ctxTiers) { if ($windowSize -le $tier.maxWindow) { $t = $tier; break } }
+    $ramp = @(@{ at = 0; color = $GREEN; sev = 0 })
+    $span = ($t.red - $t.amber) / $ctxGradient.Count
+    for ($i = 0; $i -lt $ctxGradient.Count; $i++) {
+        $ramp += @{ at = $t.amber + $i * $span; color = $ctxGradient[$i]; sev = $(if ($i -eq 0) { 1 } else { 2 }) }
+    }
+    $ramp += @{ at = $t.red;    color = $RED;    sev = 3; bold = $true }
+    $ramp += @{ at = $t.purple; color = $PURPLE; sev = 4; bold = $true; mark = $true }
+    return $ramp
+}
+
+# Eighth-block bar: 8 sub-steps per cell, so 10 cells resolve ~80 levels.
+# Names are deliberately not $FULL/$TRACK — PowerShell variables are case-insensitive,
+# so those would collide with the $full/$track locals and render digits, not blocks.
+$eighths = @([char]0x258F, [char]0x258E, [char]0x258D, [char]0x258C,
+             [char]0x258B, [char]0x258A, [char]0x2589)   # 1/8 .. 7/8
+$chBlock = [char]0x2588
+$chTrack = [char]0x2591
+
+function Bar($pct, $step) {
+    $pct = [math]::Max(0, [math]::Min(100, [double]$pct))
+    $cells   = $pct / 100 * $barWidth
+    $nFull   = [int][math]::Floor($cells)
+    $nRem    = [int][math]::Floor(($cells - $nFull) * 8)
+    $fillStr = [string]$chBlock * $nFull
+    if ($nRem -gt 0) { $fillStr += $eighths[$nRem - 1] }
+    $trackStr = [string]$chTrack * ($barWidth - $nFull - $(if ($nRem -gt 0) { 1 } else { 0 }))
+    # Percent padded to 3 columns so the line doesn't shift as digit count changes.
+    $bar = (Paint $step $fillStr) + (C $CTRACK $trackStr) + ' ' + (Paint $step ('{0,3}%' -f [math]::Round($pct)))
+    if ($step.mark) { $bar += Paint $step " $([char]0x26A0)" }
+    return $bar
+}
+
+# TimeSpan until an ISO-8601 or epoch-seconds stamp; $null if unparseable.
+function ResetSpan($stamp) {
+    if (-not $stamp) { return $null }
+    $t = if ($stamp -is [string]) { [datetime]::Parse($stamp).ToUniversalTime() }
+         else { [datetime]::UnixEpoch.AddSeconds([double]$stamp) }
+    if (-not $t) { return $null }
+    return $t - [datetime]::UtcNow
+}
+# "4d3h" / "2h14m" / "18m" — minutes zero-padded so this field doesn't jitter either.
+# Floor, not [int]: PowerShell's [int] cast rounds (and rounds half to even), so a
+# 6.65-day span would print as "7d15h".
+function FmtSpan($s) {
+    if ($null -eq $s -or $s.TotalSeconds -le 0) { return 'now' }
+    if ($s.TotalDays  -ge 1) { return "$([math]::Floor($s.TotalDays))d$($s.Hours)h" }
+    if ($s.TotalHours -ge 1) { return "$([math]::Floor($s.TotalHours))h$('{0:00}' -f $s.Minutes)m" }
+    return "$([math]::Floor($s.TotalMinutes))m"
+}
+
+$ClaudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
+
+# Plugin mode badge, read from the flag file the plugin's own hooks write.
+function Badge($flagName, $label, $color, $valid) {
+    $f = Join-Path $ClaudeDir $flagName
+    if (-not (Test-Path $f)) { return $null }
+    $item = Get-Item -LiteralPath $f -Force
+    # Reject reparse points and oversized files: a flag pointed at another file would
+    # otherwise get its bytes — ANSI escapes included — rendered on every render.
+    if (-not $item -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $null }
+    if ($item.Length -gt 64) { return $null }
+    $mode = ([string](Get-Content -LiteralPath $f -TotalCount 1)).Trim().ToLowerInvariant() -replace '[^a-z0-9-]', ''
+    if ($mode -and -not ($valid -contains $mode)) { return $null }
+    if ($mode -eq 'off') { return $null }
+    if (-not $mode -or $mode -eq 'full') { return (C $color "[$label]") }
+    return (C $color "[$label`:$($mode.ToUpperInvariant())]")
+}
+
+# ================= line 1: environment =================
+$l1 = @()
+if ($show.caveman)  { $b = Badge '.caveman-active' 'CAVEMAN' 172 @('off','lite','full','ultra','wenyan-lite','wenyan','wenyan-full','wenyan-ultra','commit','review','compress'); if ($b) { $l1 += $b } }
+if ($show.ponytail) { $b = Badge '.ponytail-active' 'PONYTAIL' 108 @('off','lite','full','ultra'); if ($b) { $l1 += $b } }
+if ($show.model -and $j.model.display_name) { $l1 += C 111 $j.model.display_name }
+
+$dir = if ($j.workspace.current_dir) { $j.workspace.current_dir } else { $j.cwd }
+if ($show.dir -and $dir) { $l1 += C 245 (Split-Path -Leaf $dir) }
+
+if ($show.branch -and $dir) {
+    $branch = & git -C $dir rev-parse --abbrev-ref HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $branch) {
+        $dirty = if (& git -C $dir status --porcelain 2>$null) { '*' } else { '' }
+        $l1 += C 150 "$branch$dirty"
+    }
+}
+if ($show.cost -and $j.cost.total_cost_usd -ge $costFloor) {
+    $l1 += C 245 ('${0:N2}' -f $j.cost.total_cost_usd)
+}
+
+# ================= line 2: usage bars =================
+$l2 = @()
+
+$cw = $j.context_window
+if ($show.context -and $cw.context_window_size -gt 0) {
+    $step = PickStep (CtxRamp $cw.context_window_size) $cw.used_percentage
+    $l2 += (C $DIM 'ctx ') + (Bar $cw.used_percentage $step)
+}
+
+if ($show.quota5h -and $j.rate_limits.five_hour) {
+    $q = $j.rate_limits.five_hour
+    $seg = (C $DIM '5h ') + (Bar $q.used_percentage (PickStep $ramp5h $q.used_percentage))
+    $seg += C $DIM " $([char]0x21BB)$(FmtSpan (ResetSpan $q.resets_at))"
+    $l2 += $seg
+}
+
+if ($show.quota7d -and $j.rate_limits.seven_day) {
+    $q = $j.rate_limits.seven_day
+    $step = PickStep $floor7d $q.used_percentage
+    $pace = $null
+    $left = ResetSpan $q.resets_at
+    if ($left) {
+        $elapsed = [math]::Max(0.0, [math]::Min(1.0, 1 - ($left.TotalSeconds / $weekSeconds)))
+        if ($elapsed -ge $paceGraceFrac) {
+            $pace = [math]::Min(99.9, $q.used_percentage / ($elapsed * 100))
+            $step = Worse $step (PickStep $rampPace $pace)
+        }
+    }
+    $seg = (C $DIM '7d ') + (Bar $q.used_percentage $step)
+    $seg += C $DIM " $([char]0x21BB)$(FmtSpan $left)"
+    if ($show.pace -and $null -ne $pace) { $seg += ' ' + (Paint $step ('{0}{1:0.0}' -f [char]0xD7, $pace)) }
+    $l2 += $seg
+}
+
+$lines = @()
+if ($l1.Count) { $lines += ($l1 -join (C $DIM ' | ')) }
+if ($l2.Count) { $lines += ($l2 -join (C $DIM "  $([char]0xB7) ")) }
+[Console]::Write($lines -join "`n")
