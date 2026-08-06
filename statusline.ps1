@@ -32,6 +32,15 @@ $barWidth = 10           # cells per bar; shared so the three compare by eye
 $GREEN = 108; $AMBER = 179; $YELLOW = 226; $RED = 196; $PURPLE = 201
 $CTRACK = 240; $DIM = 240
 
+# Plugin badges. Each plugin keeps its own hue; brightness within that hue tracks
+# the intensity tier, so the level reads at a glance instead of only from the text
+# suffix. A badge appears at all only when the plugin is installed and has written
+# its flag file, so anyone without these plugins never sees them.
+$badgeColors = @{
+    caveman  = @{ off = 240; lite = 137; full = 172; ultra = 208 }   # gray -> tan -> orange -> bright orange
+    ponytail = @{ off = 240; lite =  65; full = 108; ultra =  84 }   # gray -> dim sage -> sage -> bright mint
+}
+
 # ---- ctx: thresholds tiered by window size ------------------------------
 # A flat 20%-is-yellow rule punishes small windows: 20% of 200k is 40k, which is
 # nothing. First tier whose maxWindow covers the model's window wins.
@@ -140,12 +149,36 @@ function Bar($pct, $step) {
     return $bar
 }
 
-# TimeSpan until an ISO-8601 or epoch-seconds stamp; $null if unparseable.
+# TimeSpan until a reset stamp, or $null when there is nothing usable.
+#
+# Every plausible shape is handled because the type is not guaranteed: PowerShell's
+# ConvertFrom-Json silently turns ISO-8601 strings into [datetime] objects, so a
+# plain `-is [string]` test misses them and the value falls through to the epoch
+# branch, where casting a DateTime to [double] throws and the whole thing collapses
+# to null. That is what rendered as a bogus "now".
 function ResetSpan($stamp) {
-    if (-not $stamp) { return $null }
-    $t = if ($stamp -is [string]) { [datetime]::Parse($stamp).ToUniversalTime() }
-         else { [datetime]::UnixEpoch.AddSeconds([double]$stamp) }
-    if (-not $t) { return $null }
+    if ($null -eq $stamp -or $stamp -eq '') { return $null }
+    $t = $null
+    try {
+        if ($stamp -is [datetime]) {
+            $t = $stamp.ToUniversalTime()
+        }
+        elseif ($stamp -is [string]) {
+            $parsed = [datetime]::MinValue
+            if ([datetime]::TryParse($stamp, [ref]$parsed)) { $t = $parsed.ToUniversalTime() }
+        }
+        else {
+            $n = [double]$stamp
+            # Past ~year 5138 in seconds it is really milliseconds.
+            if ([math]::Abs($n) -gt 100000000000) { $n = $n / 1000 }
+            # Not [datetime]::UnixEpoch — that was added in .NET Core 2.1 and does
+            # not exist on the .NET Framework that PowerShell 5.1 runs on, where it
+            # throws and silently takes the whole countdown with it.
+            $epoch = New-Object DateTime 1970, 1, 1, 0, 0, 0, ([DateTimeKind]::Utc)
+            $t = $epoch.AddSeconds($n)
+        }
+    } catch { return $null }
+    if ($null -eq $t) { return $null }
     return $t - [datetime]::UtcNow
 }
 # "4d3h" / "2h14m" / "18m" — minutes zero-padded so this field doesn't jitter either.
@@ -161,8 +194,10 @@ function FmtSpan($s) {
 $ClaudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
 
 # Plugin mode badge, read from the flag file the plugin's own hooks write.
-function Badge($flagName, $label, $color, $valid) {
+function Badge($flagName, $label, $palette, $valid) {
     $f = Join-Path $ClaudeDir $flagName
+    # No flag file means the plugin isn't installed, so nothing is drawn. That's
+    # what keeps these tags invisible for people who don't use the plugins.
     if (-not (Test-Path $f)) { return $null }
     $item = Get-Item -LiteralPath $f -Force
     # Reject reparse points and oversized files: a flag pointed at another file would
@@ -171,15 +206,21 @@ function Badge($flagName, $label, $color, $valid) {
     if ($item.Length -gt 64) { return $null }
     $mode = ([string](Get-Content -LiteralPath $f -TotalCount 1)).Trim().ToLowerInvariant() -replace '[^a-z0-9-]', ''
     if ($mode -and -not ($valid -contains $mode)) { return $null }
-    if ($mode -eq 'off') { return $null }
+    # Match on the level word, not the whole mode name: caveman also has wenyan-lite
+    # / wenyan-ultra and one-shot modes like commit, which all read as "full".
+    $tier = if ($mode -eq 'off')      { 'off' }
+            elseif ($mode -like '*ultra*') { 'ultra' }
+            elseif ($mode -like '*lite*')  { 'lite' }
+            else { 'full' }
+    $color = $palette[$tier]
     if (-not $mode -or $mode -eq 'full') { return (C $color "[$label]") }
     return (C $color "[$label`:$($mode.ToUpperInvariant())]")
 }
 
 # ================= line 1: environment =================
 $l1 = @()
-if ($show.caveman)  { $b = Badge '.caveman-active' 'CAVEMAN' 172 @('off','lite','full','ultra','wenyan-lite','wenyan','wenyan-full','wenyan-ultra','commit','review','compress'); if ($b) { $l1 += $b } }
-if ($show.ponytail) { $b = Badge '.ponytail-active' 'PONYTAIL' 108 @('off','lite','full','ultra'); if ($b) { $l1 += $b } }
+if ($show.caveman)  { $b = Badge '.caveman-active' 'CAVEMAN' $badgeColors.caveman @('off','lite','full','ultra','wenyan-lite','wenyan','wenyan-full','wenyan-ultra','commit','review','compress'); if ($b) { $l1 += $b } }
+if ($show.ponytail) { $b = Badge '.ponytail-active' 'PONYTAIL' $badgeColors.ponytail @('off','lite','full','ultra'); if ($b) { $l1 += $b } }
 if ($show.model -and $j.model.display_name) { $l1 += C 111 $j.model.display_name }
 
 $dir = if ($j.workspace.current_dir) { $j.workspace.current_dir } else { $j.cwd }
@@ -248,7 +289,10 @@ if ($show.context -and $cw.context_window_size -gt 0) {
 if ($show.quota5h -and $j.rate_limits.five_hour) {
     $q = $j.rate_limits.five_hour
     $seg = (C $DIM '5h ') + (Bar $q.used_percentage (PickStep $ramp5h $q.used_percentage))
-    $seg += C $DIM " $([char]0x21BB)$(FmtSpan (ResetSpan $q.resets_at))"
+    # Omit the countdown entirely when there's no usable stamp — printing "now"
+    # for missing data claims the window is resetting this second.
+    $left5 = ResetSpan $q.resets_at
+    if ($null -ne $left5) { $seg += C $DIM " $([char]0x21BB)$(FmtSpan $left5)" }
     $l2 += $seg
 }
 
@@ -265,7 +309,7 @@ if ($show.quota7d -and $j.rate_limits.seven_day) {
         }
     }
     $seg = (C $DIM '7d ') + (Bar $q.used_percentage $step)
-    $seg += C $DIM " $([char]0x21BB)$(FmtSpan $left)"
+    if ($null -ne $left) { $seg += C $DIM " $([char]0x21BB)$(FmtSpan $left)" }
     if ($show.pace -and $null -ne $pace) { $seg += ' ' + (Paint $step ('{0}{1:0.0}' -f [char]0xD7, $pace)) }
     $l2 += $seg
 }

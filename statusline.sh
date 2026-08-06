@@ -43,7 +43,10 @@ fields=$(printf '%s' "$payload" | perl -MJSON::PP -MTime::Local -0777 -ne '
 sub stamp {
     my $v = shift;
     return -1 unless defined $v;
-    return $v + 0 if $v =~ /^-?\d+(?:\.\d+)?$/;
+    if ($v =~ /^-?\d+(?:\.\d+)?$/) {
+        # Past ~year 5138 in seconds it is really milliseconds.
+        return abs($v) > 100000000000 ? $v / 1000 : $v + 0;
+    }
     if ($v =~ /^(\d{4})-(\d\d)-(\d\d)[T ](\d\d):(\d\d):(\d\d)(?:\.\d+)?(Z|[+-]\d\d:?\d\d)?/) {
         my $t = Time::Local::timegm($6, $5, $4, $3, $2 - 1, $1);
         if (defined $7 && $7 ne "Z") {
@@ -137,21 +140,35 @@ if [ "$SHOW_BRANCH" = "1" ] && [ -n "$dir" ] && [ -d "$dir" ]; then
     fi
 fi
 
-# Plugin mode badge from the flag file the plugin's own hooks write.
+# Plugin badges. Each plugin keeps its own hue; brightness within that hue tracks
+# the intensity tier, so the level reads at a glance instead of only from the text
+# suffix. No flag file means the plugin isn't installed and nothing is drawn, which
+# is what keeps these tags invisible for people who don't use the plugins.
+CAVEMAN_COLORS="240 137 172 208"    # off / lite / full / ultra
+PONYTAIL_COLORS="240 65 108 84"     # off / lite / full / ultra
+#
 # Hardening: refuse symlinks and oversized files, strip everything outside
 # [a-z0-9-], then whitelist-check. A flag pointed at another file would otherwise
 # get its bytes — ANSI escape sequences included — rendered on every render.
 badge() {
-    f="$CFG/$1"; label="$2"; color="$3"; valid="$4"
+    f="$CFG/$1"; label="$2"; colors="$3"; valid="$4"
     [ -f "$f" ] || return 0
     [ -L "$f" ] && return 0
     size=$(wc -c < "$f" 2>/dev/null | tr -d ' ') || return 0
     [ "$size" -gt 64 ] && return 0
     mode=$(head -n1 "$f" 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
-    [ "$mode" = "off" ] && return 0
     if [ -n "$mode" ]; then
         case " $valid " in *" $mode "*) ;; *) return 0 ;; esac
     fi
+    # Match on the level word, not the whole mode name: caveman also has wenyan-lite
+    # / wenyan-ultra and one-shot modes like commit, which all read as "full".
+    set -- $colors
+    case "$mode" in
+        off)      color=$1 ;;
+        *ultra*)  color=$4 ;;
+        *lite*)   color=$2 ;;
+        *)        color=$3 ;;
+    esac
     if [ -z "$mode" ] || [ "$mode" = "full" ]; then
         printf '%s[38;5;%sm[%s]%s[0m' "$ESC" "$color" "$label" "$ESC"
     else
@@ -162,11 +179,11 @@ badge() {
 
 badges=""
 if [ "$SHOW_CAVEMAN" = "1" ]; then
-    b=$(badge .caveman-active CAVEMAN 172 "off lite full ultra wenyan-lite wenyan wenyan-full wenyan-ultra commit review compress")
+    b=$(badge .caveman-active CAVEMAN "$CAVEMAN_COLORS" "off lite full ultra wenyan-lite wenyan wenyan-full wenyan-ultra commit review compress")
     [ -n "$b" ] && badges="$b"
 fi
 if [ "$SHOW_PONYTAIL" = "1" ]; then
-    b=$(badge .ponytail-active PONYTAIL 108 "off lite full ultra")
+    b=$(badge .ponytail-active PONYTAIL "$PONYTAIL_COLORS" "off lite full ultra")
     [ -n "$b" ] && { [ -n "$badges" ] && badges="$badges$ESC[38;5;240m | $ESC[0m$b" || badges="$b"; }
 fi
 

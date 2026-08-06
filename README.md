@@ -26,6 +26,24 @@ backs up `settings.json` before merging, and prints a preview to prove it works.
 
 Prefer to read before running? `curl -fsSL <the install.sh URL> -o install.sh`, read it, then `sh install.sh`.
 
+## Uninstall
+
+**Windows:**
+
+```powershell
+irm https://raw.githubusercontent.com/FanFantom9452/ClaudeCodeCLI-TokenBar/main/uninstall.ps1 | iex
+```
+
+**Linux / macOS:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/FanFantom9452/ClaudeCodeCLI-TokenBar/main/uninstall.sh | sh
+```
+
+Removes the script and its `statusLine` entry, nothing else. If you've since
+pointed `statusLine` at a different tool, it says so and leaves it alone rather
+than deleting config it never owned. Backups stay at `settings.json.bak.*`.
+
 ## Line 1: git state
 
 ```
@@ -139,5 +157,19 @@ If your plan uses a rolling window instead, the elapsed-fraction figure will be 
 
 The `[CAVEMAN]` and `[PONYTAIL]` badges are for the
 [caveman](https://github.com/JuliusBrussee/caveman) and
-[ponytail](https://github.com/DietrichGebert/ponytail) plugins. Not installed? They
-just don't show up.
+[ponytail](https://github.com/DietrichGebert/ponytail) plugins. They're read from the
+flag file each plugin writes, so if you don't have the plugins there's no flag file
+and no badge — you'll never see a tag for something you didn't install.
+
+Each plugin keeps its own hue and the brightness tracks the intensity tier, so the
+level reads without parsing the text:
+
+| Tier | caveman | ponytail |
+|---|---|---|
+| `off` | gray | gray |
+| `lite` | tan | dim sage |
+| `full` | orange | sage |
+| `ultra` | bright orange | bright mint |
+
+caveman's `wenyan-lite` / `wenyan-ultra` map to the lite/ultra tiers; its one-shot
+modes (`commit`, `review`, `compress`) read as full.
