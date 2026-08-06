@@ -50,6 +50,20 @@ There's no cost figure on purpose. On a subscription plan the payload's
 `total_cost_usd` is a notional API-equivalent price, not money being charged, and
 putting a `$` on screen reads like a meter running.
 
+### It does not touch your repo
+
+Both git calls use `--no-optional-locks`. Without it, a plain `git status` refreshes
+the index stat cache — which rewrites `.git/index` and briefly holds
+`.git/index.lock`. Harmless once; run on every statusline render it means the tool
+is writing to your repo constantly and can race your own git commands with
+`Unable to create index.lock`. The flag exists for exactly this use case.
+
+Verified: rendering both versions against a repo leaves `.git/index` mtime unchanged
+and no lock file behind.
+
+Two subprocesses per render. On a very large repo `git status` is the slow part —
+set `branch` to `$false` (`SHOW_BRANCH=0`) and the statusline makes no git calls at all.
+
 ## What the three bars mean
 
 Each bar is coloured by a different rule, because each one means something different.

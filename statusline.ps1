@@ -189,7 +189,13 @@ if ($show.branch -and $dir) {
     # One porcelain=v2 call carries branch name, ahead/behind and per-file state
     # together, so this costs the same two subprocesses the old rev-parse+status
     # pair did — the second is the line delta below.
-    $st = & git -C $dir status --porcelain=v2 --branch 2>$null
+    #
+    # --no-optional-locks matters here. A plain `git status` refreshes the index
+    # stat cache, which rewrites .git/index and briefly takes .git/index.lock. A
+    # statusline runs on every render, so that would both touch the repo and race
+    # the user's own git commands ("Unable to create index.lock"). This flag exists
+    # for precisely this case: shell prompts and IDE statuslines.
+    $st = & git -C $dir --no-optional-locks status --porcelain=v2 --branch 2>$null
     if ($LASTEXITCODE -eq 0 -and $st) {
         $branch = ''; $ahead = 0; $behind = 0; $untracked = 0; $dirty = $false
         foreach ($line in $st) {
@@ -205,7 +211,7 @@ if ($show.branch -and $dir) {
         if ($show.gitLines) {
             # Against HEAD, so staged and unstaged changes are counted together.
             # Fails silently on a repo with no commits yet; 0/0 is the right answer there.
-            $stat = (& git -C $dir diff HEAD --shortstat 2>$null) -join ''
+            $stat = (& git -C $dir --no-optional-locks diff HEAD --shortstat 2>$null) -join ''
             if ($stat -match '(\d+) insertion') { $add = [int]$Matches[1] }
             if ($stat -match '(\d+) deletion')  { $del = [int]$Matches[1] }
         }

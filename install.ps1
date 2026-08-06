@@ -1,11 +1,11 @@
-﻿# ClaudeCodeCLI-TokenBar installer (Windows)
+# ClaudeCodeCLI-TokenBar installer (Windows)
 #   irm https://raw.githubusercontent.com/FanFantom9452/ClaudeCodeCLI-TokenBar/main/install.ps1 | iex
 # Touches only files under the Claude config dir, and backs up settings.json first.
 
 $ErrorActionPreference = 'Stop'
 $Repo = 'https://raw.githubusercontent.com/FanFantom9452/ClaudeCodeCLI-TokenBar/main'
 
-# Resolve the config dir from the environment — never a hardcoded user path.
+# Resolve the config dir from the environment - never a hardcoded user path.
 $Cfg = if ($env:CLAUDE_CONFIG_DIR)  { $env:CLAUDE_CONFIG_DIR }
        elseif ($HOME)               { Join-Path $HOME '.claude' }
        elseif ($env:USERPROFILE)    { Join-Path $env:USERPROFILE '.claude' }

@@ -81,9 +81,15 @@ tint() { printf '%s[38;5;%sm%s%s[0m' "$ESC" "$1" "$2" "$ESC"; }
 # Git needs subprocesses, so it happens here rather than inside awk. One
 # porcelain=v2 call carries branch name, ahead/behind and per-file state at once;
 # the line delta below is the only extra call.
+#
+# --no-optional-locks matters here. A plain `git status` refreshes the index stat
+# cache, which rewrites .git/index and briefly takes .git/index.lock. A statusline
+# runs on every render, so that would both touch the repo and race the user's own
+# git commands ("Unable to create index.lock"). This flag exists for precisely this
+# case: shell prompts and IDE statuslines.
 branch=""
 if [ "$SHOW_BRANCH" = "1" ] && [ -n "$dir" ] && [ -d "$dir" ]; then
-    st=$(git -C "$dir" status --porcelain=v2 --branch 2>/dev/null) || st=""
+    st=$(git -C "$dir" --no-optional-locks status --porcelain=v2 --branch 2>/dev/null) || st=""
     if [ -n "$st" ]; then
         gb=$(printf '%s\n' "$st" | sed -n 's/^# branch\.head //p')
         ahead=0; behind=0
@@ -100,7 +106,7 @@ if [ "$SHOW_BRANCH" = "1" ] && [ -n "$dir" ] && [ -d "$dir" ]; then
         if [ "$SHOW_GITLINES" = "1" ]; then
             # Against HEAD, so staged and unstaged changes count together. Fails
             # silently on a repo with no commits yet; 0/0 is right there.
-            stat=$(git -C "$dir" diff HEAD --shortstat 2>/dev/null) || stat=""
+            stat=$(git -C "$dir" --no-optional-locks diff HEAD --shortstat 2>/dev/null) || stat=""
             # Parsed by field, not regex: a greedy ".*\([0-9]*\) insertion" would
             # capture only the last digit of "42 insertions".
             ad=$(printf '%s\n' "$stat" | awk 'BEGIN{a=0;d=0}
