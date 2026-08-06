@@ -3,7 +3,7 @@
 Two-line Claude Code statusline. Context window and account quota as usage bars.
 
 ```
-[CAVEMAN] | [PONYTAIL] | Opus 5 | my-project | main* | $8.10
+[CAVEMAN] | [PONYTAIL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
 ctx ███▊░░░░░░  38%  ·  5h ██████▌░░░  66% ↻1h46m  ·  7d █████▊░░░░  58% ↻5d5h ×2.3
 ```
 
@@ -25,6 +25,30 @@ Restart Claude Code afterwards. The installer finds your home directory itself,
 backs up `settings.json` before merging, and prints a preview to prove it works.
 
 Prefer to read before running? `curl -fsSL <the install.sh URL> -o install.sh`, read it, then `sh install.sh`.
+
+## Line 1: git state
+
+```
+main                  clean
+main +42/-7           42 lines added, 7 removed, not committed yet
+main ?1               one untracked file
+main ↑2               two commits not pushed
+main ↑2 +42/-7 ?1     all of it
+```
+
+`+42/-7` is `git diff HEAD` — staged and unstaged together, so it answers "what
+would I lose right now". Untracked files show separately as `?1` because no diff
+counts them, and a new file you haven't `git add`ed would otherwise look like a
+clean tree.
+
+Deliberately **not** the session's line count that Claude Code reports. That number
+covers everything changed this session including work already committed, and it
+resets when the session does. This one tracks what's still uncommitted, which is
+the thing that can actually bite you.
+
+There's no cost figure on purpose. On a subscription plan the payload's
+`total_cost_usd` is a notional API-equivalent price, not money being charged, and
+putting a `$` on screen reads like a meter running.
 
 ## What the three bars mean
 
@@ -75,10 +99,13 @@ Toggle block sits at the top of the installed script — `~/.claude/statusline.p
 `~/.claude/statusline.sh`. Flip a segment off, change `barWidth`, move a threshold,
 edit the colour ramps.
 
-Segments: `caveman` `ponytail` `model` `dir` `branch` `context` `quota5h` `quota7d` `pace` `cost`
+Segments: `caveman` `ponytail` `model` `dir` `branch` `gitAhead` `gitLines` `gitUntrk`
+`context` `quota5h` `quota7d` `pace`
+(shell script uses the same names as `SHOW_CAVEMAN`, `SHOW_GITLINES`, …)
 
-`cost` only appears at or above `costFloor` (default $5), so it stays out of the way
-on short sessions.
+Every git segment hides itself when there's nothing to say, so a clean tree on an
+up-to-date branch renders as just `main`. Turn `gitLines` off and the old `main*`
+dirty marker comes back instead.
 
 ## Requirements
 

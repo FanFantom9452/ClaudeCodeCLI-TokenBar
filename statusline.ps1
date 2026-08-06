@@ -1,7 +1,7 @@
 ﻿# ClaudeCodeCLI-TokenBar — Claude Code statusline (Windows / PowerShell)
 #
-#   line 1  [CAVEMAN] [PONYTAIL] | Opus 5 | my-project | main* | $8.10
-#   line 2  ctx ███▊░░░░░░  38% · 5h ██████▌░░░  66% ↻1h46m · 7d █████▊░░░░  58% ↻5d5h ×2.3
+#   line 1  [CAVEMAN] [PONYTAIL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
+#   line 2  ctx ███▊░░░░░░  38%  ·  5h ██████▌░░░  66% ↻1h46m  ·  7d █████▊░░░░  58% ↻5d5h ×2.3
 #
 # The three bars are coloured by three different rules on purpose:
 #   ctx  absolute %, thresholds tiered by the model's context window size
@@ -16,15 +16,16 @@ $show = @{
     ponytail  = $true    # [PONYTAIL]     badge, if the ponytail plugin is installed
     model     = $true    # Opus 5
     dir       = $true    # current directory name
-    branch    = $true    # main*  (* = uncommitted changes)
+    branch    = $true    # main   (gets a * only when gitLines is off)
+    gitAhead  = $true    # ↑2 ↓1  commits not pushed / not pulled
+    gitLines  = $true    # +42/-7 uncommitted line delta vs HEAD
+    gitUntrk  = $true    # ?1     untracked files, which no diff would catch
     context   = $true    # ctx bar
     quota5h   = $true    # 5h bar
     quota7d   = $true    # 7d bar
     pace      = $true    # ×2.1 multiplier next to the 7d bar
-    cost      = $true    # $8.10 — only at or above $costFloor
 }
-$barWidth  = 10          # cells per bar; shared so the three compare by eye
-$costFloor = 5.0         # hide cost below this many USD (0 = always show)
+$barWidth = 10           # cells per bar; shared so the three compare by eye
 
 # 256-colour palette. sev ranks severity so two rules can be compared and the
 # worse one wins; without it there'd be no way to order "yellow" against "red".
@@ -185,14 +186,48 @@ $dir = if ($j.workspace.current_dir) { $j.workspace.current_dir } else { $j.cwd 
 if ($show.dir -and $dir) { $l1 += C 245 (Split-Path -Leaf $dir) }
 
 if ($show.branch -and $dir) {
-    $branch = & git -C $dir rev-parse --abbrev-ref HEAD 2>$null
-    if ($LASTEXITCODE -eq 0 -and $branch) {
-        $dirty = if (& git -C $dir status --porcelain 2>$null) { '*' } else { '' }
-        $l1 += C 150 "$branch$dirty"
+    # One porcelain=v2 call carries branch name, ahead/behind and per-file state
+    # together, so this costs the same two subprocesses the old rev-parse+status
+    # pair did — the second is the line delta below.
+    $st = & git -C $dir status --porcelain=v2 --branch 2>$null
+    if ($LASTEXITCODE -eq 0 -and $st) {
+        $branch = ''; $ahead = 0; $behind = 0; $untracked = 0; $dirty = $false
+        foreach ($line in $st) {
+            if ($line.StartsWith('# branch.head ')) { $branch = $line.Substring(14) }
+            elseif ($line.StartsWith('# branch.ab ') -and $line -match '\+(\d+)\s+-(\d+)') {
+                $ahead = [int]$Matches[1]; $behind = [int]$Matches[2]
+            }
+            elseif ($line.StartsWith('? ')) { $untracked++ }
+            elseif ($line -match '^[12u] ') { $dirty = $true }
+        }
+
+        $add = 0; $del = 0
+        if ($show.gitLines) {
+            # Against HEAD, so staged and unstaged changes are counted together.
+            # Fails silently on a repo with no commits yet; 0/0 is the right answer there.
+            $stat = (& git -C $dir diff HEAD --shortstat 2>$null) -join ''
+            if ($stat -match '(\d+) insertion') { $add = [int]$Matches[1] }
+            if ($stat -match '(\d+) deletion')  { $del = [int]$Matches[1] }
+        }
+
+        if ($branch) {
+            # The * is redundant once the numbers are shown, so it only appears
+            # when gitLines is switched off.
+            $mark = if (-not $show.gitLines -and $dirty) { '*' } else { '' }
+            $seg = C 150 "$branch$mark"
+            if ($show.gitAhead -and ($ahead -or $behind)) {
+                $ab = ''
+                if ($ahead)  { $ab += "$([char]0x2191)$ahead" }
+                if ($behind) { $ab += "$([char]0x2193)$behind" }
+                $seg += ' ' + (C 245 $ab)
+            }
+            if ($show.gitLines -and ($add -or $del)) {
+                $seg += ' ' + (C 150 "+$add") + (C $DIM '/') + (C 203 "-$del")
+            }
+            if ($show.gitUntrk -and $untracked) { $seg += ' ' + (C 179 "?$untracked") }
+            $l1 += $seg
+        }
     }
-}
-if ($show.cost -and $j.cost.total_cost_usd -ge $costFloor) {
-    $l1 += C 245 ('${0:N2}' -f $j.cost.total_cost_usd)
 }
 
 # ================= line 2: usage bars =================
@@ -231,5 +266,5 @@ if ($show.quota7d -and $j.rate_limits.seven_day) {
 
 $lines = @()
 if ($l1.Count) { $lines += ($l1 -join (C $DIM ' | ')) }
-if ($l2.Count) { $lines += ($l2 -join (C $DIM "  $([char]0xB7) ")) }
+if ($l2.Count) { $lines += ($l2 -join (C $DIM "  $([char]0xB7)  ")) }
 [Console]::Write($lines -join "`n")

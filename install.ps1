@@ -47,7 +47,6 @@ $sample = @{
     cwd = (Get-Location).Path
     model = @{ id = 'claude-opus-5[1m]'; display_name = 'Opus 5' }
     workspace = @{ current_dir = (Get-Location).Path }
-    cost = @{ total_cost_usd = 8.1 }
     context_window = @{ context_window_size = 1000000; used_percentage = 38 }
     rate_limits = @{
         five_hour = @{ used_percentage = 66; resets_at = (Get-Date).ToUniversalTime().AddMinutes(107).ToString('yyyy-MM-ddTHH:mm:ssZ') }

@@ -1,8 +1,8 @@
 #!/bin/sh
 # ClaudeCodeCLI-TokenBar — Claude Code statusline (Linux / macOS)
 #
-#   line 1  [CAVEMAN] [PONYTAIL] | Opus 5 | my-project | main* | $8.10
-#   line 2  ctx ███▊░░░░░░  38% · 5h ██████▌░░░  66% ↻1h46m · 7d █████▊░░░░  58% ↻5d5h ×2.3
+#   line 1  [CAVEMAN] [PONYTAIL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
+#   line 2  ctx ███▊░░░░░░  38%  ·  5h ██████▌░░░  66% ↻1h46m  ·  7d █████▊░░░░  58% ↻5d5h ×2.3
 #
 # The three bars are coloured by three different rules on purpose:
 #   ctx  absolute %, thresholds tiered by the model's context window size
@@ -17,14 +17,15 @@ SHOW_CAVEMAN=1     # [CAVEMAN:FULL] badge, if the caveman plugin is installed
 SHOW_PONYTAIL=1    # [PONYTAIL]     badge, if the ponytail plugin is installed
 SHOW_MODEL=1       # Opus 5
 SHOW_DIR=1         # current directory name
-SHOW_BRANCH=1      # main*  (* = uncommitted changes)
+SHOW_BRANCH=1      # main   (gets a * only when SHOW_GITLINES is off)
+SHOW_GITAHEAD=1    # ↑2 ↓1  commits not pushed / not pulled
+SHOW_GITLINES=1    # +42/-7 uncommitted line delta vs HEAD
+SHOW_GITUNTRK=1    # ?1     untracked files, which no diff would catch
 SHOW_CONTEXT=1     # ctx bar
 SHOW_QUOTA5H=1     # 5h bar
 SHOW_QUOTA7D=1     # 7d bar
 SHOW_PACE=1        # ×2.1 multiplier next to the 7d bar
-SHOW_COST=1        # $8.10 — only at or above COST_FLOOR
 BAR_WIDTH=10       # cells per bar; shared so the three compare by eye
-COST_FLOOR=5.0     # hide cost below this many USD (0 = always show)
 # -------------------------------------------------------------------------
 
 CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -59,7 +60,6 @@ my $cw = $j->{context_window} || {};
 my $rl = $j->{rate_limits}    || {};
 my $f5 = $rl->{five_hour}     || {};
 my $f7 = $rl->{seven_day}     || {};
-my $co = $j->{cost}           || {};
 my $ws = $j->{workspace}      || {};
 print join("\t",
     time(),
@@ -67,7 +67,6 @@ print join("\t",
     $ws->{current_dir} // $j->{cwd} // "",
     $cw->{context_window_size} // 0,
     defined $cw->{used_percentage} ? $cw->{used_percentage} : -1,
-    $co->{total_cost_usd} // 0,
     defined $f5->{used_percentage} ? $f5->{used_percentage} : -1,
     stamp($f5->{resets_at}),
     defined $f7->{used_percentage} ? $f7->{used_percentage} : -1,
@@ -77,13 +76,58 @@ print join("\t",
 
 dir=$(printf '%s' "$fields" | cut -f3)
 
-# Git branch is a subprocess, so it happens here rather than inside awk.
+tint() { printf '%s[38;5;%sm%s%s[0m' "$ESC" "$1" "$2" "$ESC"; }
+
+# Git needs subprocesses, so it happens here rather than inside awk. One
+# porcelain=v2 call carries branch name, ahead/behind and per-file state at once;
+# the line delta below is the only extra call.
 branch=""
 if [ "$SHOW_BRANCH" = "1" ] && [ -n "$dir" ] && [ -d "$dir" ]; then
-    b=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null) || b=""
-    if [ -n "$b" ]; then
-        [ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ] && b="$b*"
-        branch="$b"
+    st=$(git -C "$dir" status --porcelain=v2 --branch 2>/dev/null) || st=""
+    if [ -n "$st" ]; then
+        gb=$(printf '%s\n' "$st" | sed -n 's/^# branch\.head //p')
+        ahead=0; behind=0
+        ab=$(printf '%s\n' "$st" | awk '/^# branch\.ab /{gsub(/[+-]/,"",$3); gsub(/[+-]/,"",$4); printf "%d %d",$3,$4}')
+        if [ -n "$ab" ]; then ahead=${ab%% *}; behind=${ab##* }; fi
+        # No `|| echo 0` here: grep -c already prints 0 when it matches nothing,
+        # and its exit status 1 would make the fallback append a second line.
+        untracked=$(printf '%s\n' "$st" | grep -c '^? ' 2>/dev/null)
+        dirty=$(printf '%s\n' "$st" | grep -c '^[12u] ' 2>/dev/null)
+        [ -n "$untracked" ] || untracked=0
+        [ -n "$dirty" ] || dirty=0
+
+        add=0; del=0
+        if [ "$SHOW_GITLINES" = "1" ]; then
+            # Against HEAD, so staged and unstaged changes count together. Fails
+            # silently on a repo with no commits yet; 0/0 is right there.
+            stat=$(git -C "$dir" diff HEAD --shortstat 2>/dev/null) || stat=""
+            # Parsed by field, not regex: a greedy ".*\([0-9]*\) insertion" would
+            # capture only the last digit of "42 insertions".
+            ad=$(printf '%s\n' "$stat" | awk 'BEGIN{a=0;d=0}
+                {for(i=1;i<=NF;i++){if($i~/^insertion/)a=$(i-1)+0; if($i~/^deletion/)d=$(i-1)+0}}
+                END{printf "%d %d",a,d}')
+            add=${ad%% *}; del=${ad##* }
+        fi
+
+        if [ -n "$gb" ]; then
+            # The * is redundant once the numbers are shown, so it only appears
+            # when SHOW_GITLINES is switched off.
+            mark=""
+            [ "$SHOW_GITLINES" != "1" ] && [ "$dirty" -gt 0 ] && mark="*"
+            branch=$(tint 150 "$gb$mark")
+            if [ "$SHOW_GITAHEAD" = "1" ] && { [ "$ahead" -gt 0 ] || [ "$behind" -gt 0 ]; }; then
+                abs=""
+                [ "$ahead" -gt 0 ]  && abs="↑$ahead"
+                [ "$behind" -gt 0 ] && abs="$abs↓$behind"
+                branch="$branch $(tint 245 "$abs")"
+            fi
+            if [ "$SHOW_GITLINES" = "1" ] && { [ "$add" -gt 0 ] || [ "$del" -gt 0 ]; }; then
+                branch="$branch $(tint 150 "+$add")$(tint 240 '/')$(tint 203 "-$del")"
+            fi
+            if [ "$SHOW_GITUNTRK" = "1" ] && [ "$untracked" -gt 0 ]; then
+                branch="$branch $(tint 179 "?$untracked")"
+            fi
+        fi
     fi
 fi
 
@@ -122,9 +166,9 @@ fi
 
 printf '%s' "$fields" | awk -F'\t' \
     -v esc="$ESC" -v badges="$badges" -v branch="$branch" \
-    -v barw="$BAR_WIDTH" -v costfloor="$COST_FLOOR" \
+    -v barw="$BAR_WIDTH" \
     -v s_model="$SHOW_MODEL" -v s_dir="$SHOW_DIR" -v s_ctx="$SHOW_CONTEXT" \
-    -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_pace="$SHOW_PACE" -v s_cost="$SHOW_COST" '
+    -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_pace="$SHOW_PACE" '
 function paint(t)  { return esc "[" (BOLD ? "1;" : "") "38;5;" COL "m" t esc "[0m" }
 function dim(t)    { return esc "[38;5;240m" t esc "[0m" }
 function tint(c,t) { return esc "[38;5;" c "m" t esc "[0m" }
@@ -202,7 +246,7 @@ function fmtspan(sec,   d, h, m) {
 
 {
     nowt = $1; model = $2; dir = $3; ctxw = $4 + 0; ctxp = $5 + 0
-    cost = $6 + 0; q5p = $7 + 0; q5r = $8 + 0; q7p = $9 + 0; q7r = $10 + 0
+    q5p = $6 + 0; q5r = $7 + 0; q7p = $8 + 0; q7r = $9 + 0
 
     # ---- line 1: environment ----
     n1 = 0
@@ -212,8 +256,7 @@ function fmtspan(sec,   d, h, m) {
         base = dir; sub(/\/+$/, "", base); sub(/^.*\//, "", base)
         if (base != "") l1[++n1] = tint(245, base)
     }
-    if (branch != "")                       l1[++n1] = tint(150, branch)
-    if (s_cost == "1" && cost >= costfloor + 0 && cost > 0) l1[++n1] = tint(245, sprintf("$%.2f", cost))
+    if (branch != "")                       l1[++n1] = branch   # already coloured in shell
 
     # ---- line 2: usage bars ----
     n2 = 0
