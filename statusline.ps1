@@ -1,7 +1,7 @@
 ﻿# ClaudeCodeCLI-TokenBar — Claude Code statusline (Windows / PowerShell)
 #
 #   line 1  [CAVEMAN] [PONYTAIL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
-#   line 2  ctx ███▊░░░░░░  38%  ·  5h ██████▌░░░  66% ↻1h46m  ·  7d █████▊░░░░  58% ↻5d5h ×2.3
+#   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 5d 05h 12m   ×2.3
 #
 # The three bars are coloured by three different rules on purpose:
 #   ctx  absolute %, thresholds tiered by the model's context window size
@@ -188,14 +188,25 @@ function ResetSpan($stamp) {
     if ($null -eq $t) { return $null }
     return $t - [datetime]::UtcNow
 }
-# "4d3h" / "2h14m" / "18m" — minutes zero-padded so this field doesn't jitter either.
-# Floor, not [int]: PowerShell's [int] cast rounds (and rounds half to even), so a
-# 6.65-day span would print as "7d15h".
-function FmtSpan($s) {
+# "0h 41m" for the 5h window, "5d 05h 20m" for the 7d one.
+#
+# Every unit is always printed, even at zero, so the field keeps a fixed width and
+# the line doesn't shift as the clock ticks down. Trailing units are zero-padded for
+# the same reason.
+#
+# Floor throughout, never [int]: PowerShell's [int] cast rounds, and rounds half to
+# even, so a 6.65-day span would print as 7 days.
+function FmtSpan($s, $units) {
     if ($null -eq $s -or $s.TotalSeconds -le 0) { return 'now' }
-    if ($s.TotalDays  -ge 1) { return "$([math]::Floor($s.TotalDays))d$($s.Hours)h" }
-    if ($s.TotalHours -ge 1) { return "$([math]::Floor($s.TotalHours))h$('{0:00}' -f $s.Minutes)m" }
-    return "$([math]::Floor($s.TotalMinutes))m"
+    $total = [math]::Floor($s.TotalSeconds)
+    $m = [math]::Floor(($total % 3600) / 60)
+    if ($units -eq 'dhm') {
+        $d = [math]::Floor($total / 86400)
+        $h = [math]::Floor(($total % 86400) / 3600)
+        return '{0}d {1:00}h {2:00}m' -f $d, $h, $m
+    }
+    # Hours view: any whole days fold into the hour count rather than vanishing.
+    return '{0}h {1:00}m' -f [math]::Floor($total / 3600), $m
 }
 
 $ClaudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
@@ -299,7 +310,8 @@ if ($show.quota5h -and $j.rate_limits.five_hour) {
     # Omit the countdown entirely when there's no usable stamp — printing "now"
     # for missing data claims the window is resetting this second.
     $left5 = ResetSpan $q.resets_at
-    if ($null -ne $left5) { $seg += C $DIM "$fieldGap$([char]0x21BB)$(FmtSpan $left5)" }
+    # Space after the glyph: "↻41m" runs the icon into the number.
+    if ($null -ne $left5) { $seg += C $DIM "$fieldGap$([char]0x21BB) $(FmtSpan $left5 'hm')" }
     $l2 += $seg
 }
 
@@ -316,7 +328,7 @@ if ($show.quota7d -and $j.rate_limits.seven_day) {
         }
     }
     $seg = (C $DIM '7d ') + (Bar $q.used_percentage $step)
-    if ($null -ne $left) { $seg += C $DIM "$fieldGap$([char]0x21BB)$(FmtSpan $left)" }
+    if ($null -ne $left) { $seg += C $DIM "$fieldGap$([char]0x21BB) $(FmtSpan $left 'dhm')" }
     if ($show.pace -and $null -ne $pace) { $seg += $fieldGap + (Paint $step ('{0}{1:0.0}' -f [char]0xD7, $pace)) }
     $l2 += $seg
 }

@@ -2,7 +2,7 @@
 # ClaudeCodeCLI-TokenBar — Claude Code statusline (Linux / macOS)
 #
 #   line 1  [CAVEMAN] [PONYTAIL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
-#   line 2  ctx ███▊░░░░░░  38%  ·  5h ██████▌░░░  66% ↻1h46m  ·  7d █████▊░░░░  58% ↻5d5h ×2.3
+#   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 5d 05h 12m   ×2.3
 #
 # The three bars are coloured by three different rules on purpose:
 #   ctx  absolute %, thresholds tiered by the model's context window size
@@ -264,13 +264,19 @@ function bar(p,   e, cells, nf, nr, fill, track, i, out) {
     return out
 }
 
-# "4d3h" / "2h14m" / "18m" — minutes zero-padded so this field does not jitter either.
-function fmtspan(sec,   d, h, m) {
+# "0h 41m" for the 5h window, "5d 05h 20m" for the 7d one. Every unit is always
+# printed, even at zero, so the field keeps a fixed width and the line does not
+# shift as the clock ticks down.
+function fmtspan(sec, units,   d, h, m, tot) {
     if (sec <= 0) return "now"
-    d = int(sec/86400); h = int((sec % 86400)/3600); m = int((sec % 3600)/60)
-    if (d >= 1) return d "d" h "h"
-    if (h >= 1) return sprintf("%dh%02dm", h, m)
-    return m "m"
+    tot = int(sec)
+    m = int((tot % 3600) / 60)
+    if (units == "dhm") {
+        d = int(tot / 86400); h = int((tot % 86400) / 3600)
+        return sprintf("%dd %02dh %02dm", d, h, m)
+    }
+    # Hours view: any whole days fold into the hour count rather than vanishing.
+    return sprintf("%dh %02dm", int(tot / 3600), m)
 }
 
 {
@@ -296,7 +302,8 @@ function fmtspan(sec,   d, h, m) {
     if (s_q5 == "1" && q5p >= 0) {
         q5_style(q5p)
         seg = dim("5h ") bar(q5p)
-        if (q5r > 0) seg = seg dim(gap "↻" fmtspan(q5r - nowt))
+        # Space after the glyph: "↻41m" runs the icon into the number.
+        if (q5r > 0) seg = seg dim(gap "↻ " fmtspan(q5r - nowt, "hm"))
         l2[++n2] = seg
     }
     if (s_q7 == "1" && q7p >= 0) {
@@ -317,7 +324,7 @@ function fmtspan(sec,   d, h, m) {
         }
         style_of_sev(sev)
         seg = dim("7d ") bar(q7p)
-        if (q7r > 0) seg = seg dim(gap "↻" fmtspan(q7r - nowt))
+        if (q7r > 0) seg = seg dim(gap "↻ " fmtspan(q7r - nowt, "dhm"))
         if (s_pace == "1" && pace >= 0) seg = seg gap paint(sprintf("×%.1f", pace))
         l2[++n2] = seg
     }
