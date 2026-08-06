@@ -26,6 +26,12 @@ SHOW_QUOTA5H=1     # 5h bar
 SHOW_QUOTA7D=1     # 7d bar
 SHOW_PACE=1        # ×2.1 multiplier next to the 7d bar
 BAR_WIDTH=10       # cells per bar; shared so the three compare by eye
+FIELD_GAP="   "    # space between a bar's % and the ↻reset / ×pace that follow it.
+                   # One space reads as glued to the number, since the % itself
+                   # already sits two spaces off the bar.
+SEG_GAP="    "     # space each side of the · between bars. Keep this wider than
+                   # FIELD_GAP, or fields inside a segment look further apart than
+                   # the segments themselves and the grouping reads backwards.
 # -------------------------------------------------------------------------
 
 CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -189,7 +195,7 @@ fi
 
 printf '%s' "$fields" | awk -F'\t' \
     -v esc="$ESC" -v badges="$badges" -v branch="$branch" \
-    -v barw="$BAR_WIDTH" \
+    -v barw="$BAR_WIDTH" -v gap="$FIELD_GAP" -v seggap="$SEG_GAP" \
     -v s_model="$SHOW_MODEL" -v s_dir="$SHOW_DIR" -v s_ctx="$SHOW_CONTEXT" \
     -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_pace="$SHOW_PACE" '
 function paint(t)  { return esc "[" (BOLD ? "1;" : "") "38;5;" COL "m" t esc "[0m" }
@@ -290,7 +296,7 @@ function fmtspan(sec,   d, h, m) {
     if (s_q5 == "1" && q5p >= 0) {
         q5_style(q5p)
         seg = dim("5h ") bar(q5p)
-        if (q5r > 0) seg = seg dim(" ↻" fmtspan(q5r - nowt))
+        if (q5r > 0) seg = seg dim(gap "↻" fmtspan(q5r - nowt))
         l2[++n2] = seg
     }
     if (s_q7 == "1" && q7p >= 0) {
@@ -311,14 +317,14 @@ function fmtspan(sec,   d, h, m) {
         }
         style_of_sev(sev)
         seg = dim("7d ") bar(q7p)
-        if (q7r > 0) seg = seg dim(" ↻" fmtspan(q7r - nowt))
-        if (s_pace == "1" && pace >= 0) seg = seg " " paint(sprintf("×%.1f", pace))
+        if (q7r > 0) seg = seg dim(gap "↻" fmtspan(q7r - nowt))
+        if (s_pace == "1" && pace >= 0) seg = seg gap paint(sprintf("×%.1f", pace))
         l2[++n2] = seg
     }
 
     out = ""
     for (i = 1; i <= n1; i++) out = out (i > 1 ? dim(" | ") : "") l1[i]
     if (n1 > 0 && n2 > 0) out = out "\n"
-    for (i = 1; i <= n2; i++) out = out (i > 1 ? dim("  ·  ") : "") l2[i]
+    for (i = 1; i <= n2; i++) out = out (i > 1 ? dim(seggap "·" seggap) : "") l2[i]
     printf "%s", out
 }'

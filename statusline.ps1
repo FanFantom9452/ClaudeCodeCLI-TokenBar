@@ -26,6 +26,13 @@ $show = @{
     pace      = $true    # ×2.1 multiplier next to the 7d bar
 }
 $barWidth = 10           # cells per bar; shared so the three compare by eye
+$fieldGap = '   '        # space between a bar's % and the ↻reset / ×pace that
+                         # follow it. One space reads as glued to the number,
+                         # since the % itself already sits two spaces off the bar.
+$segGap   = '    '       # space each side of the · between bars. Keep this wider
+                         # than $fieldGap, or fields inside a segment look further
+                         # apart than the segments themselves and the grouping
+                         # reads backwards.
 
 # 256-colour palette. sev ranks severity so two rules can be compared and the
 # worse one wins; without it there'd be no way to order "yellow" against "red".
@@ -292,7 +299,7 @@ if ($show.quota5h -and $j.rate_limits.five_hour) {
     # Omit the countdown entirely when there's no usable stamp — printing "now"
     # for missing data claims the window is resetting this second.
     $left5 = ResetSpan $q.resets_at
-    if ($null -ne $left5) { $seg += C $DIM " $([char]0x21BB)$(FmtSpan $left5)" }
+    if ($null -ne $left5) { $seg += C $DIM "$fieldGap$([char]0x21BB)$(FmtSpan $left5)" }
     $l2 += $seg
 }
 
@@ -309,12 +316,12 @@ if ($show.quota7d -and $j.rate_limits.seven_day) {
         }
     }
     $seg = (C $DIM '7d ') + (Bar $q.used_percentage $step)
-    if ($null -ne $left) { $seg += C $DIM " $([char]0x21BB)$(FmtSpan $left)" }
-    if ($show.pace -and $null -ne $pace) { $seg += ' ' + (Paint $step ('{0}{1:0.0}' -f [char]0xD7, $pace)) }
+    if ($null -ne $left) { $seg += C $DIM "$fieldGap$([char]0x21BB)$(FmtSpan $left)" }
+    if ($show.pace -and $null -ne $pace) { $seg += $fieldGap + (Paint $step ('{0}{1:0.0}' -f [char]0xD7, $pace)) }
     $l2 += $seg
 }
 
 $lines = @()
 if ($l1.Count) { $lines += ($l1 -join (C $DIM ' | ')) }
-if ($l2.Count) { $lines += ($l2 -join (C $DIM "  $([char]0xB7)  ")) }
+if ($l2.Count) { $lines += ($l2 -join (C $DIM "$segGap$([char]0xB7)$segGap")) }
 [Console]::Write($lines -join "`n")

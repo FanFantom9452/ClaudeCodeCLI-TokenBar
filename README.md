@@ -9,10 +9,10 @@ ctx ███▊░░░░░░  38%  ·  5h ██████▌░░░  
 
 ## Install
 
-**Windows** — PowerShell:
+**Windows** — one command, works in both CMD and PowerShell:
 
-```powershell
-irm https://raw.githubusercontent.com/FanFantom9452/ClaudeCodeCLI-TokenBar/main/install.ps1 | iex
+```
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/FanFantom9452/ClaudeCodeCLI-TokenBar/main/install.ps1 | iex"
 ```
 
 **Linux / macOS**:
@@ -21,6 +21,11 @@ irm https://raw.githubusercontent.com/FanFantom9452/ClaudeCodeCLI-TokenBar/main/
 curl -fsSL https://raw.githubusercontent.com/FanFantom9452/ClaudeCodeCLI-TokenBar/main/install.sh | sh
 ```
 
+Already in PowerShell and want it shorter? `irm <the install.ps1 URL> | iex` does the
+same thing. The longer form is listed first because it's the one that works wherever
+you happen to be — CMD, PowerShell, or a `Win+R` box — without you having to check
+which shell you're in first.
+
 Restart Claude Code afterwards. The installer finds your home directory itself,
 backs up `settings.json` before merging, and prints a preview to prove it works.
 
@@ -28,10 +33,10 @@ Prefer to read before running? `curl -fsSL <the install.sh URL> -o install.sh`, 
 
 ## Uninstall
 
-**Windows:**
+**Windows** — CMD or PowerShell:
 
-```powershell
-irm https://raw.githubusercontent.com/FanFantom9452/ClaudeCodeCLI-TokenBar/main/uninstall.ps1 | iex
+```
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/FanFantom9452/ClaudeCodeCLI-TokenBar/main/uninstall.ps1 | iex"
 ```
 
 **Linux / macOS:**
