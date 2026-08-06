@@ -4,7 +4,7 @@ Two-line Claude Code statusline. Context window and account quota as usage bars.
 
 ```
 [CAVEMAN] | [PONYTAIL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
-ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 5d 05h 12m   ×2.3
+ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 2d 12h 30m    -6%
 ```
 
 ## Install
@@ -95,7 +95,7 @@ Each bar is coloured by a different rule, because each one means something diffe
 |---|---|---|
 | `ctx` | absolute %, thresholds tiered by window size | 20% of a 1M window is roomy; 20% of 200k is not |
 | `5h` | absolute %, five fixed bands | 5-hour window, work comes in bursts — a rate figure would just jitter |
-| `7d` | burn **pace** vs the weekly allowance | tells you if you're on track to survive the week, not just how much is gone |
+| `7d` | how far **ahead of or behind** the even 1/7-per-day line you are | tells you if you're on track to survive the week, not just how much is gone |
 
 `ctx` can go back down (`/compact`, new session). Quotas only climb until they reset —
 that's why the `↻` countdown sits on the quota bars, not on `ctx`.
@@ -115,20 +115,33 @@ Between yellow and red, six gradient steps. On a 1M window those land on 20/25/3
 
 green <40% · amber 40% · yellow 60% · **red 80%** · **purple 95% ⚠**
 
-### 7d pace
+### 7d deviation
 
-`×2.1` next to the bar is the multiplier driving the colour:
+The `+2%` / `-10%` beside the bar is how many quota points you're ahead of, or
+behind, spending the week evenly:
 
 ```
-pace = used% / (elapsed fraction of the window × 100)
+deviation = used% − (elapsed fraction of the window × 100)
 ```
 
-`×1.0` means dead on the 1/7-per-day allowance. green ≤1× · yellow >1× · **red >2×** · **purple >3× ⚠**
+A week split evenly is 100/7 = **14.3 points per day**. So `-10%` means you've
+banked ten points, `±0%` is dead on the line, and `+35%` means you're two and a
+half days' worth ahead of schedule.
 
-Two corrections built in, because pace alone lies at both ends of a window:
+green ≤0 · amber over the line · **red a full day ahead (+14)** · **purple two days ahead (+29) ⚠**
 
-- **First 10% elapsed**: no pace colour. The divisor is too small — 3% used in the first hour computes as ×5 and would flash purple for nothing.
-- **Absolute floor**: ≥85% used is at least red, ≥95% purple, whatever the pace says. 95% used on day 6.9 is a respectable ×0.97, and also almost nothing left.
+It's cumulative, not per-day, and that's the point: a heavy Monday followed by
+frugal days walks the number back toward zero. A single-day figure would keep
+shouting about Monday forever.
+
+Subtraction rather than a ratio also means it needs no special case at the start of
+a window. 3% used in the first hour is simply `+3`; a ratio would divide by almost
+zero and scream about a 5× overspend.
+
+**Absolute floor**: ≥85% used colours the bar red and ≥95% purple no matter what the
+deviation says — `+2%` with 95% gone is honestly "on budget" and also nearly empty.
+The bar shows the worse of the two; the number keeps its own colour, so it never
+overstates what it actually measures.
 
 ## Customise
 
@@ -137,7 +150,7 @@ Toggle block sits at the top of the installed script — `~/.claude/statusline.p
 edit the colour ramps.
 
 Segments: `caveman` `ponytail` `model` `dir` `branch` `gitAhead` `gitLines` `gitUntrk`
-`context` `quota5h` `quota7d` `pace`
+`context` `quota5h` `quota7d` `delta`
 (shell script uses the same names as `SHOW_CAVEMAN`, `SHOW_GITLINES`, …)
 
 Every git segment hides itself when there's nothing to say, so a clean tree on an
@@ -157,7 +170,7 @@ dirty marker comes back instead.
 7d bars simply don't render — no fake zeros. To see what your build sends, set
 `CLAUDE_STATUSLINE_DEBUG=1` and read the payload dump from your temp dir.
 
-The 7d pace math assumes the weekly window is 7 days long and `resets_at` is its end.
+The 7d deviation assumes the weekly window is 7 days long and `resets_at` is its end.
 If your plan uses a rolling window instead, the elapsed-fraction figure will be off.
 
 The `[CAVEMAN]` and `[PONYTAIL]` badges are for the

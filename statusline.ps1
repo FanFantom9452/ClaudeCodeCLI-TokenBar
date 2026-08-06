@@ -1,12 +1,12 @@
 ﻿# ClaudeCodeCLI-TokenBar — Claude Code statusline (Windows / PowerShell)
 #
 #   line 1  [CAVEMAN] [PONYTAIL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
-#   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 5d 05h 12m   ×2.3
+#   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 2d 12h 30m    -6%
 #
 # The three bars are coloured by three different rules on purpose:
 #   ctx  absolute %, thresholds tiered by the model's context window size
 #   5h   absolute %, five fixed bands
-#   7d   burn *pace* against the weekly allowance, with an absolute floor
+#   7d   cumulative deviation from the even 1/7-per-day line, with a floor
 #
 # Payload schema verified against Claude Code 2.1.223.
 
@@ -23,10 +23,11 @@ $show = @{
     context   = $true    # ctx bar
     quota5h   = $true    # 5h bar
     quota7d   = $true    # 7d bar
-    pace      = $true    # ×2.1 multiplier next to the 7d bar
+    delta     = $true    # +2% / -10% next to the 7d bar: quota points ahead of
+                         # (or behind) the even 1/7-per-day line
 }
 $barWidth = 10           # cells per bar; shared so the three compare by eye
-$fieldGap = '   '        # space between a bar's % and the ↻reset / ×pace that
+$fieldGap = '   '        # space between a bar's % and the ↻reset / ±delta that
                          # follow it. One space reads as glued to the number,
                          # since the % itself already sits two spaces off the bar.
 $segGap   = '    '       # space each side of the · between bars. Keep this wider
@@ -62,8 +63,8 @@ $ctxTiers = @(
 $ctxGradient = @(226, 220, 214, 208, 202, 203)
 
 # ---- 5h: five fixed bands ------------------------------------------------
-# No pace rule here: the window is only 5 hours, work arrives in bursts, and a
-# pace figure over that span jitters too much to read.
+# No deviation figure here: the window is only 5 hours, work arrives in bursts,
+# and a rate over that span jitters too much to read.
 $ramp5h = @(
     @{ at =  0; color = $GREEN;  sev = 0 }
     @{ at = 40; color = $AMBER;  sev = 1 }
@@ -72,29 +73,31 @@ $ramp5h = @(
     @{ at = 95; color = $PURPLE; sev = 4; bold = $true; mark = $true }
 )
 
-# ---- 7d: pace against the weekly allowance -------------------------------
-# The payload carries no per-day breakdown, so "used more than 2x a day's share"
-# is measured over the whole elapsed window instead of a rolling 24h:
-#   pace = used% / (elapsed_fraction * 100)
-# pace 1.0 means dead on the 1/7-per-day allowance. Steadier than a 24h snapshot,
-# since one heavy day doesn't misreport the week.
-$rampPace = @(
-    @{ at = 0.0; color = $GREEN;  sev = 0 }                             # on or under
-    @{ at = 1.0; color = $YELLOW; sev = 2 }                             # over 1x
-    @{ at = 2.0; color = $RED;    sev = 3; bold = $true }               # over 2x
-    @{ at = 3.0; color = $PURPLE; sev = 4; bold = $true; mark = $true } # over 3x
+# ---- 7d: cumulative deviation from the sustainable line -------------------
+# A week's quota spread evenly is 100/7 = 14.3 points per day, so
+#   deviation = used% - elapsed_fraction * 100
+# is just how many quota points you are ahead of (or behind) that line. Negative
+# means you banked some. It nets out across the week: a heavy Monday followed by
+# frugal days walks back toward zero, which a single-day figure would never show.
+#
+# Subtraction, not a ratio, so it stays well defined at the very start of a window
+# and needs no grace period: 3% used in the first hour is simply +3, where a ratio
+# would divide by almost zero and read as a 5x overspend.
+$dailyShare = 100 / 7
+$devRamp = @(
+    @{ at = [double]::MinValue; color = $GREEN;  sev = 0 }                # at or under the line
+    @{ at = 1;                  color = $AMBER;  sev = 1 }                # over it
+    @{ at = $dailyShare;        color = $RED;    sev = 3; bold = $true }  # a full day ahead
+    @{ at = 2 * $dailyShare;    color = $PURPLE; sev = 4; bold = $true; mark = $true }
 )
-# Pace lies at the end of a window: 95% used on day 6.9 is pace 0.97 — "green"
-# while almost nothing is left. This floor is the worse-case override.
+# Deviation says nothing about headroom: +2 with 95% gone is "on budget" and also
+# nearly empty. This floor is the worse-case override for the bar.
 $floor7d = @(
     @{ at =  0; color = $GREEN;  sev = 0 }
     @{ at = 85; color = $RED;    sev = 3; bold = $true }
     @{ at = 95; color = $PURPLE; sev = 4; bold = $true; mark = $true }
 )
-$weekSeconds   = 7 * 24 * 3600   # assumed window length; resets_at is its end
-$paceGraceFrac = 0.10            # below this much elapsed the divisor is too
-                                 # small to trust — 3% used in the first hour
-                                 # would compute as 5x and flash purple
+$weekSeconds = 7 * 24 * 3600     # assumed window length; resets_at is its end
 # -------------------------------------------------------------------------
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -318,18 +321,25 @@ if ($show.quota5h -and $j.rate_limits.five_hour) {
 if ($show.quota7d -and $j.rate_limits.seven_day) {
     $q = $j.rate_limits.seven_day
     $step = PickStep $floor7d $q.used_percentage
-    $pace = $null
+    $dev = $null; $devStep = $null
     $left = ResetSpan $q.resets_at
-    if ($left) {
+    if ($null -ne $left) {
         $elapsed = [math]::Max(0.0, [math]::Min(1.0, 1 - ($left.TotalSeconds / $weekSeconds)))
-        if ($elapsed -ge $paceGraceFrac) {
-            $pace = [math]::Min(99.9, $q.used_percentage / ($elapsed * 100))
-            $step = Worse $step (PickStep $rampPace $pace)
-        }
+        # Round before choosing the colour so the shade always agrees with the
+        # digits shown: +0.4 renders as ±0% and must not be coloured as an overrun.
+        $dev = [int][math]::Round($q.used_percentage - $elapsed * 100)
+        $devStep = PickStep $devRamp $dev
+        $step = Worse $step $devStep
     }
     $seg = (C $DIM '7d ') + (Bar $q.used_percentage $step)
     if ($null -ne $left) { $seg += C $DIM "$fieldGap$([char]0x21BB) $(FmtSpan $left 'dhm')" }
-    if ($show.pace -and $null -ne $pace) { $seg += $fieldGap + (Paint $step ('{0}{1:0.0}' -f [char]0xD7, $pace)) }
+    if ($show.delta -and $null -ne $dev) {
+        $txt = if ($dev -gt 0) { "+$dev%" } elseif ($dev -lt 0) { "$dev%" } else { "$([char]0xB1)0%" }
+        # Painted with its own severity, not the bar's. The bar can be purple for
+        # being nearly empty while the deviation itself is only mildly over, and
+        # colouring the number purple too would overstate what it measures.
+        $seg += $fieldGap + (Paint $devStep $txt)
+    }
     $l2 += $seg
 }
 

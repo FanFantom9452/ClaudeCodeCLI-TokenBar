@@ -2,12 +2,12 @@
 # ClaudeCodeCLI-TokenBar — Claude Code statusline (Linux / macOS)
 #
 #   line 1  [CAVEMAN] [PONYTAIL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
-#   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 5d 05h 12m   ×2.3
+#   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 2d 12h 30m    -6%
 #
 # The three bars are coloured by three different rules on purpose:
 #   ctx  absolute %, thresholds tiered by the model's context window size
 #   5h   absolute %, five fixed bands
-#   7d   burn *pace* against the weekly allowance, with an absolute floor
+#   7d   cumulative deviation from the even 1/7-per-day line, with a floor
 #
 # Needs perl (JSON::PP and Time::Local are core modules, so nothing to install)
 # and awk. Payload schema verified against Claude Code 2.1.223.
@@ -24,9 +24,10 @@ SHOW_GITUNTRK=1    # ?1     untracked files, which no diff would catch
 SHOW_CONTEXT=1     # ctx bar
 SHOW_QUOTA5H=1     # 5h bar
 SHOW_QUOTA7D=1     # 7d bar
-SHOW_PACE=1        # ×2.1 multiplier next to the 7d bar
+SHOW_DELTA=1       # +2% / -10% next to the 7d bar: quota points ahead of (or
+                   # behind) the even 1/7-per-day line
 BAR_WIDTH=10       # cells per bar; shared so the three compare by eye
-FIELD_GAP="   "    # space between a bar's % and the ↻reset / ×pace that follow it.
+FIELD_GAP="   "    # space between a bar's % and the ↻reset / ±delta that follow it.
                    # One space reads as glued to the number, since the % itself
                    # already sits two spaces off the bar.
 SEG_GAP="    "     # space each side of the · between bars. Keep this wider than
@@ -197,7 +198,7 @@ printf '%s' "$fields" | awk -F'\t' \
     -v esc="$ESC" -v badges="$badges" -v branch="$branch" \
     -v barw="$BAR_WIDTH" -v gap="$FIELD_GAP" -v seggap="$SEG_GAP" \
     -v s_model="$SHOW_MODEL" -v s_dir="$SHOW_DIR" -v s_ctx="$SHOW_CONTEXT" \
-    -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_pace="$SHOW_PACE" '
+    -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_delta="$SHOW_DELTA" '
 function paint(t)  { return esc "[" (BOLD ? "1;" : "") "38;5;" COL "m" t esc "[0m" }
 function dim(t)    { return esc "[38;5;240m" t esc "[0m" }
 function tint(c,t) { return esc "[38;5;" c "m" t esc "[0m" }
@@ -222,8 +223,8 @@ function ctx_style(p, w,   g, span, i) {
     else { COL=108; BOLD=0; MARK=0 }
 }
 
-# --- 5h: five fixed bands. No pace rule — the window is only 5 hours, work
-# arrives in bursts, and a pace figure over that span jitters too much to read.
+# --- 5h: five fixed bands. No deviation figure — the window is only 5 hours,
+# work arrives in bursts, and a rate over that span jitters too much to read.
 function q5_style(p) {
     if      (p >= 95) { COL=201; BOLD=1; MARK=1 }
     else if (p >= 80) { COL=196; BOLD=1; MARK=0 }
@@ -232,10 +233,19 @@ function q5_style(p) {
     else              { COL=108; BOLD=0; MARK=0 }
 }
 
-# --- 7d: severity of burn pace vs the weekly allowance...
-function sev_pace(x) { if (x >= 3) return 4; if (x >= 2) return 3; if (x >= 1) return 2; return 0 }
-# ...and an absolute floor, because pace lies at the end of a window: 95% used on
-# day 6.9 is pace 0.97 — "green" while almost nothing is left.
+# --- 7d: how many quota points you are ahead of the even 1/7-per-day line.
+# Subtraction, not a ratio, so it stays well defined at the very start of a window
+# and needs no grace period: 3% used in the first hour is simply +3, where a ratio
+# would divide by almost zero and read as a 5x overspend.
+function sev_dev(d,   ds) {
+    ds = 100 / 7
+    if (d >= 2 * ds) return 4      # two full days ahead
+    if (d >= ds)     return 3      # a full day ahead
+    if (d >= 1)      return 1      # over the line
+    return 0                       # at or under it
+}
+# Deviation says nothing about headroom: +2 with 95% gone is "on budget" and also
+# nearly empty. This floor is the worse-case override for the bar.
 function sev_abs7(p) { if (p >= 95) return 4; if (p >= 85) return 3; return 0 }
 function style_of_sev(s) {
     if      (s == 4) { COL=201; BOLD=1; MARK=1 }
@@ -308,24 +318,31 @@ function fmtspan(sec, units,   d, h, m, tot) {
     }
     if (s_q7 == "1" && q7p >= 0) {
         sev = sev_abs7(q7p)
-        pace = -1
+        havedev = 0
         if (q7r > 0) {
             # elapsed fraction of the assumed 7-day window; resets_at is its end
             elapsed = 1 - ((q7r - nowt) / (7*24*3600))
             if (elapsed < 0) elapsed = 0; if (elapsed > 1) elapsed = 1
-            # Below 10% elapsed the divisor is too small to trust — 3% used in the
-            # first hour would compute as 5x and flash purple.
-            if (elapsed >= 0.10) {
-                pace = q7p / (elapsed * 100)
-                if (pace > 99.9) pace = 99.9
-                ps = sev_pace(pace)
-                if (ps > sev) sev = ps
-            }
+            raw = q7p - elapsed * 100
+            # Round before choosing the colour so the shade always agrees with the
+            # digits shown: +0.4 renders as ±0% and must not read as an overrun.
+            dev = int(raw + (raw >= 0 ? 0.5 : -0.5))
+            devsev = sev_dev(dev)
+            if (devsev > sev) sev = devsev
+            havedev = 1
         }
         style_of_sev(sev)
         seg = dim("7d ") bar(q7p)
         if (q7r > 0) seg = seg dim(gap "↻ " fmtspan(q7r - nowt, "dhm"))
-        if (s_pace == "1" && pace >= 0) seg = seg gap paint(sprintf("×%.1f", pace))
+        if (s_delta == "1" && havedev) {
+            # Painted with its own severity rather than the severity of the bar.
+            # The bar can be purple for being nearly empty while the deviation is
+            # only mildly over, and colouring the number purple too would overstate
+            # what it measures. NOTE: no apostrophes anywhere inside this awk
+            # program - it is single-quoted in the shell, so one would end it here.
+            style_of_sev(devsev)
+            seg = seg gap paint(dev > 0 ? sprintf("+%d%%", dev) : (dev < 0 ? sprintf("%d%%", dev) : "±0%"))
+        }
         l2[++n2] = seg
     }
 
