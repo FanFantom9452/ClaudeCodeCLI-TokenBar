@@ -1,6 +1,6 @@
 ﻿# ClaudeCodeCLI-TokenBar — Claude Code statusline (Windows / PowerShell)
 #
-#   line 1  [CAVEMAN] [PONYTAIL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
+#   line 1  [CAVEMAN:FULL] [PONYTAIL:FULL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
 #   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 2d 12h 30m    -6%
 #
 # The three bars are coloured by three different rules on purpose:
@@ -234,7 +234,11 @@ function Badge($flagName, $label, $palette, $valid) {
             elseif ($mode -like '*lite*')  { 'lite' }
             else { 'full' }
     $color = $palette[$tier]
-    if (-not $mode -or $mode -eq 'full') { return (C $color "[$label]") }
+    # The mode is always spelled out, `full` included. Hiding the suffix for full
+    # meant the state you sit in almost all the time was the one carrying no
+    # information -- a bare "[CAVEMAN]" never told you which tier was active.
+    # An empty flag file means the plugin defaulted, which is full.
+    if (-not $mode) { $mode = 'full' }
     return (C $color "[$label`:$($mode.ToUpperInvariant())]")
 }
 

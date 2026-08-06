@@ -1,7 +1,7 @@
 #!/bin/sh
 # ClaudeCodeCLI-TokenBar — Claude Code statusline (Linux / macOS)
 #
-#   line 1  [CAVEMAN] [PONYTAIL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
+#   line 1  [CAVEMAN:FULL] [PONYTAIL:FULL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
 #   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 2d 12h 30m    -6%
 #
 # The three bars are coloured by three different rules on purpose:
@@ -176,12 +176,13 @@ badge() {
         *lite*)   color=$2 ;;
         *)        color=$3 ;;
     esac
-    if [ -z "$mode" ] || [ "$mode" = "full" ]; then
-        printf '%s[38;5;%sm[%s]%s[0m' "$ESC" "$color" "$label" "$ESC"
-    else
-        up=$(printf '%s' "$mode" | tr '[:lower:]' '[:upper:]')
-        printf '%s[38;5;%sm[%s:%s]%s[0m' "$ESC" "$color" "$label" "$up" "$ESC"
-    fi
+    # The mode is always spelled out, full included. Hiding the suffix for full
+    # meant the state you sit in almost all the time was the one carrying no
+    # information - a bare "[CAVEMAN]" never told you which tier was active.
+    # An empty flag file means the plugin defaulted, which is full.
+    [ -z "$mode" ] && mode=full
+    up=$(printf '%s' "$mode" | tr '[:lower:]' '[:upper:]')
+    printf '%s[38;5;%sm[%s:%s]%s[0m' "$ESC" "$color" "$label" "$up" "$ESC"
 }
 
 badges=""
