@@ -124,9 +124,16 @@ $ErrorActionPreference = 'SilentlyContinue'
 #
 # TrimStart for the BOM: [Console]::In stripped one, a manual decode does not, and
 # a leading U+FEFF makes ConvertFrom-Json reject the document.
-$stdinBuf = New-Object System.IO.MemoryStream
-[Console]::OpenStandardInput().CopyTo($stdinBuf)
-$raw = [System.Text.UTF8Encoding]::new($false).GetString($stdinBuf.ToArray()).TrimStart([char]0xFEFF)
+#
+# Only when stdin is a pipe. Reading an interactive terminal blocks forever, so
+# running this by hand to see what it does would hang instead of printing the
+# "no payload" line that says what went wrong.
+$raw = ''
+if ([Console]::IsInputRedirected) {
+    $stdinBuf = New-Object System.IO.MemoryStream
+    [Console]::OpenStandardInput().CopyTo($stdinBuf)
+    $raw = [System.Text.UTF8Encoding]::new($false).GetString($stdinBuf.ToArray()).TrimStart([char]0xFEFF)
+}
 if ($env:CLAUDE_STATUSLINE_DEBUG -eq '1') {
     $raw | Set-Content -LiteralPath (Join-Path $env:TEMP 'claude-statusline-payload.json') -Encoding utf8
 }
