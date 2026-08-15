@@ -14,6 +14,7 @@
 $show = @{
     caveman   = $true    # [CAVEMAN:FULL] badge, if the caveman plugin is installed
     ponytail  = $true    # [PONYTAIL]     badge, if the ponytail plugin is installed
+    toggles   = $true    # any other mode flag found in modes/<session_id>/
     model     = $true    # Opus 5
     dir       = $true    # current directory name
     branch    = $true    # main   (gets a * only when gitLines is off)
@@ -44,9 +45,20 @@ $CTRACK = 240; $DIM = 240
 # the intensity tier, so the level reads at a glance instead of only from the text
 # suffix. A badge appears at all only when the plugin is installed and has written
 # its flag file, so anyone without these plugins never sees them.
+#
+# `default` is for any toggle this script has never heard of. Adding one is meant to
+# cost nothing here: drop a flag file in modes/<session_id>/ and it renders. Give it
+# an entry below only when you want it off the neutral ramp and onto its own hue.
 $badgeColors = @{
     caveman  = @{ off = 240; lite = 137; full = 172; ultra = 208 }   # gray -> tan -> orange -> bright orange
     ponytail = @{ off = 240; lite =  65; full = 108; ultra =  84 }   # gray -> dim sage -> sage -> bright mint
+    default  = @{ off = 240; lite = 245; full = 250; ultra = 255 }   # gray -> ... -> white
+}
+# Modes each known plugin can legitimately be in. An unlisted name is validated on
+# shape alone, which is all it takes to keep escapes and control bytes off the line.
+$badgeModes = @{
+    caveman  = @('off','lite','full','ultra','wenyan-lite','wenyan','wenyan-full','wenyan-ultra','commit','review','compress')
+    ponytail = @('off','lite','full','ultra','review')
 }
 
 # ---- ctx: thresholds tiered by window size ------------------------------
@@ -225,42 +237,91 @@ function FmtSpan($s, $units) {
 
 $ClaudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
 
-# Plugin mode badge, read from the flag file the plugin's own hooks write.
-function Badge($flagName, $label, $palette, $valid) {
-    $f = Join-Path $ClaudeDir $flagName
-    # No flag file means the plugin isn't installed, so nothing is drawn. That's
-    # what keeps these tags invisible for people who don't use the plugins.
-    if (-not (Test-Path $f)) { return $null }
-    $item = Get-Item -LiteralPath $f -Force
+# Mode value out of one flag file, or $null when there is nothing usable there.
+#
+# No flag file means the plugin isn't installed, so nothing is drawn. That's what
+# keeps these tags invisible for people who don't use the plugins.
+function ReadMode($path, $valid) {
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    $item = Get-Item -LiteralPath $path -Force
     # Reject reparse points and oversized files: a flag pointed at another file would
     # otherwise get its bytes — ANSI escapes included — rendered on every render.
-    if (-not $item -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $null }
+    if (-not $item -or $item.PSIsContainer) { return $null }
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $null }
     if ($item.Length -gt 64) { return $null }
-    $mode = ([string](Get-Content -LiteralPath $f -TotalCount 1)).Trim().ToLowerInvariant() -replace '[^a-z0-9-]', ''
-    if ($mode -and -not ($valid -contains $mode)) { return $null }
+    $mode = ([string](Get-Content -LiteralPath $path -TotalCount 1)).Trim().ToLowerInvariant() -replace '[^a-z0-9-]', ''
+    # An empty flag file means the plugin defaulted, which is full.
+    if (-not $mode) { return 'full' }
+    if ($valid) { if ($valid -notcontains $mode) { return $null } }
+    elseif ($mode.Length -gt 16) { return $null }
+    return $mode
+}
+
+function BadgeText($name, $mode, $palette) {
     # Match on the level word, not the whole mode name: caveman also has wenyan-lite
     # / wenyan-ultra and one-shot modes like commit, which all read as "full".
     $tier = if ($mode -eq 'off')      { 'off' }
             elseif ($mode -like '*ultra*') { 'ultra' }
             elseif ($mode -like '*lite*')  { 'lite' }
             else { 'full' }
-    $color = $palette[$tier]
     # The mode is always spelled out, `full` included. Hiding the suffix for full
     # meant the state you sit in almost all the time was the one carrying no
     # information -- a bare "[CAVEMAN]" never told you which tier was active.
-    # An empty flag file means the plugin defaulted, which is full.
-    if (-not $mode) { $mode = 'full' }
-    return (C $color "[$label`:$($mode.ToUpperInvariant())]")
+    return (C $palette[$tier] "[$($name.ToUpperInvariant())`:$($mode.ToUpperInvariant())]")
+}
+
+# Every mode flag that applies to this session, newest layout first.
+#
+# Session-scoped flags live at modes/<session_id>/<name>, so each window carries its
+# own level — that is what a plugin writes once it keys the flag by session id. The
+# legacy layout is one global .<name>-active per plugin, which is what the stock
+# caveman and ponytail write; there the badge necessarily shows whichever session
+# changed it last, since the file has no way to say which one it meant.
+#
+# Both are read, session-scoped wins, so a stock install and a session-keyed one
+# both render and a mixed setup renders the right thing for each.
+function CollectModes($sessionId) {
+    $found = [ordered]@{}
+    $claimed = @{}   # names the session dir spoke for, whether or not it read back
+    # The id lands in a path, so it is checked before it gets there rather than
+    # trusted for being ours.
+    if ($sessionId -match '^[0-9a-fA-F][0-9a-fA-F-]{7,63}$') {
+        $dir = Join-Path (Join-Path $ClaudeDir 'modes') $sessionId
+        if (Test-Path -LiteralPath $dir) {
+            foreach ($f in @(Get-ChildItem -LiteralPath $dir -File -Force -ErrorAction SilentlyContinue | Sort-Object Name)) {
+                $n = $f.Name.ToLowerInvariant()
+                if ($n -notmatch '^[a-z0-9][a-z0-9-]{0,31}$') { continue }
+                $claimed[$n] = $true
+                $m = ReadMode $f.FullName $badgeModes[$n]
+                if ($m) { $found[$n] = $m }
+            }
+        }
+    }
+    # No fallback once the session dir has a file for that name, even an unreadable
+    # one. Falling back would put another session's level on this window's line,
+    # which is the exact confusion the session-scoped layout exists to end.
+    foreach ($n in @('caveman', 'ponytail')) {
+        if ($claimed.Contains($n)) { continue }
+        $m = ReadMode (Join-Path $ClaudeDir ".$n-active") $badgeModes[$n]
+        if ($m) { $found[$n] = $m }
+    }
+    return $found
 }
 
 # ================= line 1: environment =================
 $l1 = @()
-if ($show.caveman)  { $b = Badge '.caveman-active' 'CAVEMAN' $badgeColors.caveman @('off','lite','full','ultra','wenyan-lite','wenyan','wenyan-full','wenyan-ultra','commit','review','compress'); if ($b) { $l1 += $b } }
-# 'review' is ponytail's one-shot mode, the counterpart of caveman's commit/review/
-# compress. It was missing from this list, so /ponytail-review wrote a mode the
-# whitelist rejected and the badge vanished entirely — the plugin looked uninstalled
-# at exactly the moment it was doing something.
-if ($show.ponytail) { $b = Badge '.ponytail-active' 'PONYTAIL' $badgeColors.ponytail @('off','lite','full','ultra','review'); if ($b) { $l1 += $b } }
+
+# Fixed order — caveman, ponytail, then everything else alphabetically — so the line
+# never reshuffles between renders just because a flag file was touched.
+$modes = CollectModes ([string]$j.session_id)
+$order = @('caveman', 'ponytail') + @($modes.Keys | Where-Object { $_ -ne 'caveman' -and $_ -ne 'ponytail' } | Sort-Object)
+foreach ($n in $order) {
+    if (-not $modes.Contains($n)) { continue }
+    $gate = if ($n -eq 'caveman') { $show.caveman } elseif ($n -eq 'ponytail') { $show.ponytail } else { $show.toggles }
+    if (-not $gate) { continue }
+    $pal = if ($badgeColors.Contains($n)) { $badgeColors[$n] } else { $badgeColors.default }
+    $l1 += BadgeText $n $modes[$n] $pal
+}
 
 # The badges above are read off disk; every other segment, both lines, comes out
 # of the payload. So an empty or unparseable stdin renders as two lonely plugin

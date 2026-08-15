@@ -149,8 +149,8 @@ Toggle block sits at the top of the installed script — `~/.claude/statusline.p
 `~/.claude/statusline.sh`. Flip a segment off, change `barWidth`, move a threshold,
 edit the colour ramps.
 
-Segments: `caveman` `ponytail` `model` `dir` `branch` `gitAhead` `gitLines` `gitUntrk`
-`context` `quota5h` `quota7d` `delta`
+Segments: `caveman` `ponytail` `toggles` `model` `dir` `branch` `gitAhead` `gitLines`
+`gitUntrk` `context` `quota5h` `quota7d` `delta`
 (shell script uses the same names as `SHOW_CAVEMAN`, `SHOW_GITLINES`, …)
 
 Every git segment hides itself when there's nothing to say, so a clean tree on an
@@ -192,3 +192,40 @@ level reads without parsing the text:
 caveman's `wenyan-lite` / `wenyan-ultra` map to the lite/ultra tiers. One-shot modes
 read as full on both sides — caveman's `commit` / `review` / `compress`, ponytail's
 `review`.
+
+### Where the flags are read from
+
+Two layouts, session-scoped first:
+
+```
+~/.claude/modes/<session_id>/caveman     ← this window's level
+~/.claude/.caveman-active                ← whichever window set it last
+```
+
+The stock plugins only write the second one. It has no session key and both plugins
+rewrite it to their configured default on every `SessionStart`, so with several
+windows open the badge tracks whichever session most recently started or switched
+mode — not the one you're looking at. Setting `defaultMode` in each plugin's own
+`config.json` at least keeps every window agreeing on the same level.
+
+The first path is what a plugin writes once it keys the flag by session id. When
+it's there it wins outright, with no fall back to the global file even if the value
+is unreadable: falling back would put another session's level on this window's line,
+which is the exact confusion the session-scoped layout exists to end.
+
+### Toggles other than these two
+
+Any file in `modes/<session_id>/` renders as a badge. The filename is the label, the
+contents are the level:
+
+```sh
+echo ultra > ~/.claude/modes/$SESSION_ID/redteam    # → [REDTEAM:ULTRA]
+```
+
+Names outside `[a-z0-9-]`, values longer than 16 characters, symlinks, and files over
+64 bytes are all ignored, so a flag can't smuggle escape sequences onto the line.
+caveman and ponytail additionally have to name a mode those plugins actually have.
+
+Unknown toggles use a neutral gray-to-white ramp. Give one its own hue by adding an
+entry to `$badgeColors` / `colors_for` in the installed script. Turn them all off
+with the `toggles` segment; `caveman` and `ponytail` keep their own switches.

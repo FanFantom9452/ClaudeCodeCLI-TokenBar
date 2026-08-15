@@ -15,6 +15,7 @@
 # ---- toggles: 1 shows, 0 hides -------------------------------------------
 SHOW_CAVEMAN=1     # [CAVEMAN:FULL] badge, if the caveman plugin is installed
 SHOW_PONYTAIL=1    # [PONYTAIL]     badge, if the ponytail plugin is installed
+SHOW_TOGGLES=1     # any other mode flag found in modes/<session_id>/
 SHOW_MODEL=1       # Opus 5
 SHOW_DIR=1         # current directory name
 SHOW_BRANCH=1      # main   (gets a * only when SHOW_GITLINES is off)
@@ -80,7 +81,8 @@ print join("\t",
     defined $f5->{used_percentage} ? $f5->{used_percentage} : -1,
     stamp($f5->{resets_at}),
     defined $f7->{used_percentage} ? $f7->{used_percentage} : -1,
-    stamp($f7->{resets_at})
+    stamp($f7->{resets_at}),
+    $j->{session_id} // ""
 ), "\n";
 ') || exit 0
 
@@ -153,19 +155,56 @@ fi
 # is what keeps these tags invisible for people who don't use the plugins.
 CAVEMAN_COLORS="240 137 172 208"    # off / lite / full / ultra
 PONYTAIL_COLORS="240 65 108 84"     # off / lite / full / ultra
-#
+# For any toggle this script has never heard of. Adding one is meant to cost nothing
+# here: drop a flag file in modes/<session_id>/ and it renders. Give it a case below
+# only when you want it off the neutral ramp and onto its own hue.
+DEFAULT_COLORS="240 245 250 255"    # gray -> ... -> white
+
+colors_for() {
+    case "$1" in
+        caveman)  printf '%s' "$CAVEMAN_COLORS" ;;
+        ponytail) printf '%s' "$PONYTAIL_COLORS" ;;
+        *)        printf '%s' "$DEFAULT_COLORS" ;;
+    esac
+}
+# Modes each known plugin can legitimately be in. An unlisted name gets an empty
+# list, meaning it is validated on shape alone — all it takes to keep escapes and
+# control bytes off the line. 'review' is ponytail's one-shot mode, the counterpart
+# of caveman's commit/review/compress.
+valid_for() {
+    case "$1" in
+        caveman)  printf '%s' "off lite full ultra wenyan-lite wenyan wenyan-full wenyan-ultra commit review compress" ;;
+        ponytail) printf '%s' "off lite full ultra review" ;;
+        *)        printf '' ;;
+    esac
+}
+gate_for() {
+    case "$1" in
+        caveman)  [ "$SHOW_CAVEMAN" = "1" ] ;;
+        ponytail) [ "$SHOW_PONYTAIL" = "1" ] ;;
+        *)        [ "$SHOW_TOGGLES" = "1" ] ;;
+    esac
+}
+
 # Hardening: refuse symlinks and oversized files, strip everything outside
 # [a-z0-9-], then whitelist-check. A flag pointed at another file would otherwise
 # get its bytes — ANSI escape sequences included — rendered on every render.
 badge() {
-    f="$CFG/$1"; label="$2"; colors="$3"; valid="$4"
+    f="$1"; name="$2"; colors=$(colors_for "$2"); valid=$(valid_for "$2")
     [ -f "$f" ] || return 0
     [ -L "$f" ] && return 0
     size=$(wc -c < "$f" 2>/dev/null | tr -d ' ') || return 0
     [ "$size" -gt 64 ] && return 0
     mode=$(head -n1 "$f" 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
-    if [ -n "$mode" ]; then
+    # The mode is always spelled out, full included. Hiding the suffix for full
+    # meant the state you sit in almost all the time was the one carrying no
+    # information - a bare "[CAVEMAN]" never told you which tier was active.
+    # An empty flag file means the plugin defaulted, which is full.
+    [ -z "$mode" ] && mode=full
+    if [ -n "$valid" ]; then
         case " $valid " in *" $mode "*) ;; *) return 0 ;; esac
+    else
+        [ ${#mode} -gt 16 ] && return 0
     fi
     # Match on the level word, not the whole mode name: caveman also has wenyan-lite
     # / wenyan-ultra and one-shot modes like commit, which all read as "full".
@@ -176,26 +215,55 @@ badge() {
         *lite*)   color=$2 ;;
         *)        color=$3 ;;
     esac
-    # The mode is always spelled out, full included. Hiding the suffix for full
-    # meant the state you sit in almost all the time was the one carrying no
-    # information - a bare "[CAVEMAN]" never told you which tier was active.
-    # An empty flag file means the plugin defaulted, which is full.
-    [ -z "$mode" ] && mode=full
-    up=$(printf '%s' "$mode" | tr '[:lower:]' '[:upper:]')
-    printf '%s[38;5;%sm[%s:%s]%s[0m' "$ESC" "$color" "$label" "$up" "$ESC"
+    upn=$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')
+    upm=$(printf '%s' "$mode" | tr '[:lower:]' '[:upper:]')
+    printf '%s[38;5;%sm[%s:%s]%s[0m' "$ESC" "$color" "$upn" "$upm" "$ESC"
 }
 
 badges=""
-if [ "$SHOW_CAVEMAN" = "1" ]; then
-    b=$(badge .caveman-active CAVEMAN "$CAVEMAN_COLORS" "off lite full ultra wenyan-lite wenyan wenyan-full wenyan-ultra commit review compress")
-    [ -n "$b" ] && badges="$b"
+add_badge() {
+    b=$(badge "$1" "$2")
+    [ -n "$b" ] || return 0
+    if [ -n "$badges" ]; then badges="$badges$ESC[38;5;240m | $ESC[0m$b"; else badges="$b"; fi
+}
+
+# Two flag layouts are read. Session-scoped flags live at modes/<session_id>/<name>,
+# so each window carries its own level — that is what a plugin writes once it keys
+# the flag by session id. The legacy layout is one global .<name>-active per plugin,
+# which is what the stock caveman and ponytail write; there the badge necessarily
+# shows whichever session changed it last, since the file has no way to say which
+# one it meant. Session-scoped wins, so stock and session-keyed installs both render.
+sid=$(printf '%s' "$fields" | cut -f10)
+modedir=""
+# The id lands in a path, so it is checked before it gets there rather than trusted
+# for being ours. Stripping anything outside [0-9a-fA-F-] must be a no-op.
+if [ -n "$sid" ] && [ ${#sid} -le 64 ] &&
+   [ "$(printf '%s' "$sid" | tr -cd '0-9a-fA-F-')" = "$sid" ]; then
+    [ -d "$CFG/modes/$sid" ] && modedir="$CFG/modes/$sid"
 fi
-if [ "$SHOW_PONYTAIL" = "1" ]; then
-    # 'review' is ponytail's one-shot mode, the counterpart of caveman's commit/
-    # review/compress. Leaving it out meant /ponytail-review wrote a mode the
-    # whitelist rejected and the badge vanished entirely.
-    b=$(badge .ponytail-active PONYTAIL "$PONYTAIL_COLORS" "off lite full ultra review")
-    [ -n "$b" ] && { [ -n "$badges" ] && badges="$badges$ESC[38;5;240m | $ESC[0m$b" || badges="$b"; }
+
+# Fixed order — caveman, ponytail, then everything else alphabetically (the glob
+# sorts) — so the line never reshuffles between renders just because a flag file
+# was touched.
+for n in caveman ponytail; do
+    gate_for "$n" || continue
+    if [ -n "$modedir" ] && [ -f "$modedir/$n" ]; then
+        add_badge "$modedir/$n" "$n"
+    else
+        add_badge "$CFG/.$n-active" "$n"
+    fi
+done
+if [ -n "$modedir" ] && [ "$SHOW_TOGGLES" = "1" ]; then
+    for f in "$modedir"/*; do
+        [ -f "$f" ] || continue
+        n=${f##*/}
+        case "$n" in
+            caveman|ponytail) continue ;;
+            [!a-z0-9]*)       continue ;;
+            *[!a-z0-9-]*)     continue ;;
+        esac
+        add_badge "$f" "$n"
+    done
 fi
 
 printf '%s' "$fields" | awk -F'\t' \
