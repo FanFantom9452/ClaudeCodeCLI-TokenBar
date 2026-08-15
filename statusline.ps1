@@ -103,7 +103,18 @@ $weekSeconds = 7 * 24 * 3600     # assumed window length; resets_at is its end
 $ErrorActionPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
-$raw = [Console]::In.ReadToEnd()
+# Read stdin as bytes and decode UTF-8 here, rather than [Console]::In.ReadToEnd().
+# That reader decodes with the console input code page — 950 on a Traditional
+# Chinese Windows, 936 on a Simplified one — so a project path with CJK in it came
+# back as mojibake. Worse, in those double-byte pages 0x5C is a valid trail byte,
+# so a mangled pair can swallow a path separator and take the whole JSON parse with
+# it. Decoding the bytes ourselves is code-page independent.
+#
+# TrimStart for the BOM: [Console]::In stripped one, a manual decode does not, and
+# a leading U+FEFF makes ConvertFrom-Json reject the document.
+$stdinBuf = New-Object System.IO.MemoryStream
+[Console]::OpenStandardInput().CopyTo($stdinBuf)
+$raw = [System.Text.UTF8Encoding]::new($false).GetString($stdinBuf.ToArray()).TrimStart([char]0xFEFF)
 if ($env:CLAUDE_STATUSLINE_DEBUG -eq '1') {
     $raw | Set-Content -LiteralPath (Join-Path $env:TEMP 'claude-statusline-payload.json') -Encoding utf8
 }
