@@ -256,7 +256,11 @@ function Badge($flagName, $label, $palette, $valid) {
 # ================= line 1: environment =================
 $l1 = @()
 if ($show.caveman)  { $b = Badge '.caveman-active' 'CAVEMAN' $badgeColors.caveman @('off','lite','full','ultra','wenyan-lite','wenyan','wenyan-full','wenyan-ultra','commit','review','compress'); if ($b) { $l1 += $b } }
-if ($show.ponytail) { $b = Badge '.ponytail-active' 'PONYTAIL' $badgeColors.ponytail @('off','lite','full','ultra'); if ($b) { $l1 += $b } }
+# 'review' is ponytail's one-shot mode, the counterpart of caveman's commit/review/
+# compress. It was missing from this list, so /ponytail-review wrote a mode the
+# whitelist rejected and the badge vanished entirely — the plugin looked uninstalled
+# at exactly the moment it was doing something.
+if ($show.ponytail) { $b = Badge '.ponytail-active' 'PONYTAIL' $badgeColors.ponytail @('off','lite','full','ultra','review'); if ($b) { $l1 += $b } }
 
 # The badges above are read off disk; every other segment, both lines, comes out
 # of the payload. So an empty or unparseable stdin renders as two lonely plugin

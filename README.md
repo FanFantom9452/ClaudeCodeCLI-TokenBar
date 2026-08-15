@@ -189,5 +189,6 @@ level reads without parsing the text:
 | `full` | orange | sage |
 | `ultra` | bright orange | bright mint |
 
-caveman's `wenyan-lite` / `wenyan-ultra` map to the lite/ultra tiers; its one-shot
-modes (`commit`, `review`, `compress`) read as full.
+caveman's `wenyan-lite` / `wenyan-ultra` map to the lite/ultra tiers. One-shot modes
+read as full on both sides — caveman's `commit` / `review` / `compress`, ponytail's
+`review`.

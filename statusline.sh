@@ -191,7 +191,10 @@ if [ "$SHOW_CAVEMAN" = "1" ]; then
     [ -n "$b" ] && badges="$b"
 fi
 if [ "$SHOW_PONYTAIL" = "1" ]; then
-    b=$(badge .ponytail-active PONYTAIL "$PONYTAIL_COLORS" "off lite full ultra")
+    # 'review' is ponytail's one-shot mode, the counterpart of caveman's commit/
+    # review/compress. Leaving it out meant /ponytail-review wrote a mode the
+    # whitelist rejected and the badge vanished entirely.
+    b=$(badge .ponytail-active PONYTAIL "$PONYTAIL_COLORS" "off lite full ultra review")
     [ -n "$b" ] && { [ -n "$badges" ] && badges="$badges$ESC[38;5;240m | $ESC[0m$b" || badges="$b"; }
 fi
 
