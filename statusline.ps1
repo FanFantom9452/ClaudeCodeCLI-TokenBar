@@ -257,6 +257,13 @@ function Badge($flagName, $label, $palette, $valid) {
 $l1 = @()
 if ($show.caveman)  { $b = Badge '.caveman-active' 'CAVEMAN' $badgeColors.caveman @('off','lite','full','ultra','wenyan-lite','wenyan','wenyan-full','wenyan-ultra','commit','review','compress'); if ($b) { $l1 += $b } }
 if ($show.ponytail) { $b = Badge '.ponytail-active' 'PONYTAIL' $badgeColors.ponytail @('off','lite','full','ultra'); if ($b) { $l1 += $b } }
+
+# The badges above are read off disk; every other segment, both lines, comes out
+# of the payload. So an empty or unparseable stdin renders as two lonely plugin
+# tags and no hint as to why — which reads like the tool half-broke rather than
+# like it got nothing to work with. Say so instead.
+if ($null -eq $j) { $l1 += C $RED 'no payload' }
+
 if ($show.model -and $j.model.display_name) { $l1 += C 111 $j.model.display_name }
 
 $dir = if ($j.workspace.current_dir) { $j.workspace.current_dir } else { $j.cwd }
