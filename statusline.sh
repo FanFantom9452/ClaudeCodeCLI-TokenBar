@@ -66,11 +66,21 @@ sub stamp {
     }
     return -1;
 }
+# -2 for a quota block that is not in the payload at all, -1 for one that is
+# there with a null number, and the number itself otherwise. awk has to tell
+# those two apart: a block that is merely late gets a placeholder bar, one that
+# is never coming gets no bar. Collapsing both to -1 here would throw away the
+# only thing that separates them.
+sub pct {
+    my $o = shift;
+    return -2 unless defined $o;
+    return defined $o->{used_percentage} ? $o->{used_percentage} : -1;
+}
 my $j  = eval { decode_json($_) } || {};
 my $cw = $j->{context_window} || {};
 my $rl = $j->{rate_limits}    || {};
-my $f5 = $rl->{five_hour}     || {};
-my $f7 = $rl->{seven_day}     || {};
+my $f5 = $rl->{five_hour};
+my $f7 = $rl->{seven_day};
 my $ws = $j->{workspace}      || {};
 print join("\t",
     time(),
@@ -78,10 +88,10 @@ print join("\t",
     $ws->{current_dir} // $j->{cwd} // "",
     $cw->{context_window_size} // 0,
     defined $cw->{used_percentage} ? $cw->{used_percentage} : -1,
-    defined $f5->{used_percentage} ? $f5->{used_percentage} : -1,
-    stamp($f5->{resets_at}),
-    defined $f7->{used_percentage} ? $f7->{used_percentage} : -1,
-    stamp($f7->{resets_at}),
+    pct($f5),
+    stamp(defined $f5 ? $f5->{resets_at} : undef),
+    pct($f7),
+    stamp(defined $f7 ? $f7->{resets_at} : undef),
     $j->{session_id} // ""
 ), "\n";
 ') || exit 0
@@ -346,6 +356,18 @@ function bar(p,   e, cells, nf, nr, fill, track, i, out) {
     return out
 }
 
+# The bar for a number that does not exist yet. rate_limits only shows up once
+# there has been an API response, and used_percentage is null until the first
+# message, so for the opening seconds of a session there is genuinely nothing to
+# plot. Drawing nothing then reads as broken, and drawing bar(0) is worse: no
+# data would render as a green, entirely believable 0%. An empty track and a
+# literal --% hold the column width and cannot be mistaken for a measurement.
+function bar_pending(   i, track) {
+    track = ""
+    for (i = 0; i < barw; i++) track = track "░"
+    return tint(240, track) " " tint(240, sprintf("%3s%%", "--"))
+}
+
 # "0h 41m" for the 5h window, "5d 05h 20m" for the 7d one. Every unit is always
 # printed, even at zero, so the field keeps a fixed width and the line does not
 # shift as the clock ticks down.
@@ -377,45 +399,69 @@ function fmtspan(sec, units,   d, h, m, tot) {
 
     # ---- line 2: usage bars ----
     n2 = 0
-    if (s_ctx == "1" && ctxw > 0 && ctxp >= 0) {
-        ctx_style(ctxp, ctxw)
-        l2[++n2] = dim("ctx ") bar(ctxp)
-    }
-    if (s_q5 == "1" && q5p >= 0) {
-        q5_style(q5p)
-        seg = dim("5h ") bar(q5p)
-        # Space after the glyph: "↻41m" runs the icon into the number.
-        if (q5r > 0) seg = seg dim(gap "↻ " fmtspan(q5r - nowt, "hm"))
-        l2[++n2] = seg
-    }
-    if (s_q7 == "1" && q7p >= 0) {
-        sev = sev_abs7(q7p)
-        havedev = 0
-        if (q7r > 0) {
-            # elapsed fraction of the assumed 7-day window; resets_at is its end
-            elapsed = 1 - ((q7r - nowt) / (7*24*3600))
-            if (elapsed < 0) elapsed = 0; if (elapsed > 1) elapsed = 1
-            raw = q7p - elapsed * 100
-            # Round before choosing the colour so the shade always agrees with the
-            # digits shown: +0.4 renders as ±0% and must not read as an overrun.
-            dev = int(raw + (raw >= 0 ? 0.5 : -0.5))
-            devsev = sev_dev(dev)
-            if (devsev > sev) sev = devsev
-            havedev = 1
+    # rate_limits goes missing for two different reasons, and a single payload
+    # only tells them apart indirectly. Before the first message it is simply not
+    # there yet, and the context window own used_percentage is null for exactly
+    # the same reason, so that transient gap is what bar_pending is for. But on
+    # plans that do not report quotas it never arrives at all, and a placeholder
+    # there is a permanent dead column promising a measurement that is never
+    # coming. -2 is the block that was absent from the payload, -1 the one that
+    # was present with a null number.
+    quotacoming = (ctxp < 0)
+
+    if (s_ctx == "1" && ctxw > 0) {
+        if (ctxp < 0) {
+            l2[++n2] = dim("ctx ") bar_pending()
+        } else {
+            ctx_style(ctxp, ctxw)
+            l2[++n2] = dim("ctx ") bar(ctxp)
         }
-        style_of_sev(sev)
-        seg = dim("7d ") bar(q7p)
-        if (q7r > 0) seg = seg dim(gap "↻ " fmtspan(q7r - nowt, "dhm"))
-        if (s_delta == "1" && havedev) {
-            # Painted with its own severity rather than the severity of the bar.
-            # The bar can be purple for being nearly empty while the deviation is
-            # only mildly over, and colouring the number purple too would overstate
-            # what it measures. NOTE: no apostrophes anywhere inside this awk
-            # program - it is single-quoted in the shell, so one would end it here.
-            style_of_sev(devsev)
-            seg = seg gap paint(dev > 0 ? sprintf("+%d%%", dev) : (dev < 0 ? sprintf("%d%%", dev) : "±0%"))
+    }
+    if (s_q5 == "1" && (q5p >= 0 || q5p == -1 || quotacoming)) {
+        if (q5p < 0) {
+            l2[++n2] = dim("5h ") bar_pending()
+        } else {
+            q5_style(q5p)
+            seg = dim("5h ") bar(q5p)
+            # Space after the glyph: "↻41m" runs the icon into the number.
+            if (q5r > 0) seg = seg dim(gap "↻ " fmtspan(q5r - nowt, "hm"))
+            l2[++n2] = seg
         }
-        l2[++n2] = seg
+    }
+    if (s_q7 == "1" && (q7p >= 0 || q7p == -1 || quotacoming)) {
+        if (q7p < 0) {
+            l2[++n2] = dim("7d ") bar_pending()
+        } else {
+            sev = sev_abs7(q7p)
+            havedev = 0
+            if (q7r > 0) {
+                # elapsed fraction of the assumed 7-day window; resets_at is its end
+                elapsed = 1 - ((q7r - nowt) / (7*24*3600))
+                if (elapsed < 0) elapsed = 0; if (elapsed > 1) elapsed = 1
+                raw = q7p - elapsed * 100
+                # Round before choosing the colour so the shade always agrees with
+                # the digits shown: +0.4 renders as ±0% and must not read as an
+                # overrun.
+                dev = int(raw + (raw >= 0 ? 0.5 : -0.5))
+                devsev = sev_dev(dev)
+                if (devsev > sev) sev = devsev
+                havedev = 1
+            }
+            style_of_sev(sev)
+            seg = dim("7d ") bar(q7p)
+            if (q7r > 0) seg = seg dim(gap "↻ " fmtspan(q7r - nowt, "dhm"))
+            if (s_delta == "1" && havedev) {
+                # Painted with its own severity rather than the severity of the
+                # bar. The bar can be purple for being nearly empty while the
+                # deviation is only mildly over, and colouring the number purple
+                # too would overstate what it measures. NOTE: no apostrophes
+                # anywhere inside this awk program - it is single-quoted in the
+                # shell, so one would end it here.
+                style_of_sev(devsev)
+                seg = seg gap paint(dev > 0 ? sprintf("+%d%%", dev) : (dev < 0 ? sprintf("%d%%", dev) : "±0%"))
+            }
+            l2[++n2] = seg
+        }
     }
 
     out = ""
