@@ -11,6 +11,16 @@ $Cfg = if ($env:CLAUDE_CONFIG_DIR)  { $env:CLAUDE_CONFIG_DIR }
        elseif ($env:USERPROFILE)    { Join-Path $env:USERPROFILE '.claude' }
        else { throw 'Cannot locate your home directory. Set CLAUDE_CONFIG_DIR and retry.' }
 
+# The preview at the bottom is nothing but block glyphs and arrows, and the
+# console renders those in whatever code page it happens to be on — 950 on a
+# Traditional Chinese Windows, 936 on a Simplified one, 932 on a Japanese one.
+# Without this the install ends by showing its own output as mojibake, which
+# reads like the statusline is broken before it has even run once.
+#
+# OutputEncoding only, never InputEncoding: that setter throws on Windows
+# PowerShell when stdin is redirected, which is how `irm | iex` runs this.
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+
 New-Item -ItemType Directory -Force -Path $Cfg | Out-Null
 $Script   = Join-Path $Cfg 'statusline.ps1'
 $Settings = Join-Path $Cfg 'settings.json'
