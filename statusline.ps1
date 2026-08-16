@@ -189,6 +189,19 @@ function Bar($pct, $step) {
     return $bar
 }
 
+# The bar for a number that does not exist yet. rate_limits only shows up once
+# there has been an API response, and used_percentage is null until the first
+# message, so for the opening seconds of a session there is genuinely nothing to
+# plot.
+#
+# Drawing nothing then reads as broken, and drawing Bar 0 is worse: [double]$null
+# is 0 in PowerShell, so "no data" would render as a green, entirely believable
+# 0%. An empty track and a literal --% hold the column width and cannot be
+# mistaken for a measurement.
+function BarPending() {
+    return (C $CTRACK ([string]$chTrack * $barWidth)) + ' ' + (C $CTRACK ('{0,3}%' -f '--'))
+}
+
 # TimeSpan until a reset stamp, or $null when there is nothing usable.
 #
 # Every plausible shape is handled because the type is not guaranteed: PowerShell's
@@ -397,44 +410,72 @@ $l2 = @()
 
 $cw = $j.context_window
 if ($show.context -and $cw.context_window_size -gt 0) {
-    $step = PickStep (CtxRamp $cw.context_window_size) $cw.used_percentage
-    $l2 += (C $DIM 'ctx ') + (Bar $cw.used_percentage $step)
+    # `$null -eq`, never `-not`: 0 is falsy in PowerShell, so `-not` would call a
+    # genuine 0% "no data" and simply move the lie to the other end. Every pending
+    # test below is written this way for the same reason.
+    if ($null -eq $cw.used_percentage) {
+        $l2 += (C $DIM 'ctx ') + (BarPending)
+    } else {
+        $step = PickStep (CtxRamp $cw.context_window_size) $cw.used_percentage
+        $l2 += (C $DIM 'ctx ') + (Bar $cw.used_percentage $step)
+    }
 }
 
-if ($show.quota5h -and $j.rate_limits.five_hour) {
+# rate_limits goes missing for two different reasons, and a single payload only
+# tells them apart indirectly. Before the first message it is simply not there yet
+# — context_window's own used_percentage is null for exactly the same reason — and
+# that transient gap is what BarPending exists for. But on plans that don't report
+# quotas it never arrives at all, and a placeholder there is a permanent dead
+# column promising a measurement that is never coming.
+#
+# used_percentage is the discriminator: once it is a real number at least one
+# message has landed, so a rate_limits still absent at that point is absent for
+# good and the bar is dropped instead — which is what the README documents and
+# what statusline.sh does.
+$quotaComing = $null -eq $cw.used_percentage
+
+if ($show.quota5h) {
     $q = $j.rate_limits.five_hour
-    $seg = (C $DIM '5h ') + (Bar $q.used_percentage (PickStep $ramp5h $q.used_percentage))
-    # Omit the countdown entirely when there's no usable stamp — printing "now"
-    # for missing data claims the window is resetting this second.
-    $left5 = ResetSpan $q.resets_at
-    # Space after the glyph: "↻41m" runs the icon into the number.
-    if ($null -ne $left5) { $seg += C $DIM "$fieldGap$([char]0x21BB) $(FmtSpan $left5 'hm')" }
-    $l2 += $seg
+    if ($null -eq $q -or $null -eq $q.used_percentage) {
+        if ($null -ne $q -or $quotaComing) { $l2 += (C $DIM '5h ') + (BarPending) }
+    } else {
+        $seg = (C $DIM '5h ') + (Bar $q.used_percentage (PickStep $ramp5h $q.used_percentage))
+        # Omit the countdown entirely when there's no usable stamp — printing "now"
+        # for missing data claims the window is resetting this second.
+        $left5 = ResetSpan $q.resets_at
+        # Space after the glyph: "↻41m" runs the icon into the number.
+        if ($null -ne $left5) { $seg += C $DIM "$fieldGap$([char]0x21BB) $(FmtSpan $left5 'hm')" }
+        $l2 += $seg
+    }
 }
 
-if ($show.quota7d -and $j.rate_limits.seven_day) {
+if ($show.quota7d) {
     $q = $j.rate_limits.seven_day
-    $step = PickStep $floor7d $q.used_percentage
-    $dev = $null; $devStep = $null
-    $left = ResetSpan $q.resets_at
-    if ($null -ne $left) {
-        $elapsed = [math]::Max(0.0, [math]::Min(1.0, 1 - ($left.TotalSeconds / $weekSeconds)))
-        # Round before choosing the colour so the shade always agrees with the
-        # digits shown: +0.4 renders as ±0% and must not be coloured as an overrun.
-        $dev = [int][math]::Round($q.used_percentage - $elapsed * 100)
-        $devStep = PickStep $devRamp $dev
-        $step = Worse $step $devStep
+    if ($null -eq $q -or $null -eq $q.used_percentage) {
+        if ($null -ne $q -or $quotaComing) { $l2 += (C $DIM '7d ') + (BarPending) }
+    } else {
+        $step = PickStep $floor7d $q.used_percentage
+        $dev = $null; $devStep = $null
+        $left = ResetSpan $q.resets_at
+        if ($null -ne $left) {
+            $elapsed = [math]::Max(0.0, [math]::Min(1.0, 1 - ($left.TotalSeconds / $weekSeconds)))
+            # Round before choosing the colour so the shade always agrees with the
+            # digits shown: +0.4 renders as ±0% and must not be coloured as an overrun.
+            $dev = [int][math]::Round($q.used_percentage - $elapsed * 100)
+            $devStep = PickStep $devRamp $dev
+            $step = Worse $step $devStep
+        }
+        $seg = (C $DIM '7d ') + (Bar $q.used_percentage $step)
+        if ($null -ne $left) { $seg += C $DIM "$fieldGap$([char]0x21BB) $(FmtSpan $left 'dhm')" }
+        if ($show.delta -and $null -ne $dev) {
+            $txt = if ($dev -gt 0) { "+$dev%" } elseif ($dev -lt 0) { "$dev%" } else { "$([char]0xB1)0%" }
+            # Painted with its own severity, not the bar's. The bar can be purple for
+            # being nearly empty while the deviation itself is only mildly over, and
+            # colouring the number purple too would overstate what it measures.
+            $seg += $fieldGap + (Paint $devStep $txt)
+        }
+        $l2 += $seg
     }
-    $seg = (C $DIM '7d ') + (Bar $q.used_percentage $step)
-    if ($null -ne $left) { $seg += C $DIM "$fieldGap$([char]0x21BB) $(FmtSpan $left 'dhm')" }
-    if ($show.delta -and $null -ne $dev) {
-        $txt = if ($dev -gt 0) { "+$dev%" } elseif ($dev -lt 0) { "$dev%" } else { "$([char]0xB1)0%" }
-        # Painted with its own severity, not the bar's. The bar can be purple for
-        # being nearly empty while the deviation itself is only mildly over, and
-        # colouring the number purple too would overstate what it measures.
-        $seg += $fieldGap + (Paint $devStep $txt)
-    }
-    $l2 += $seg
 }
 
 $lines = @()
