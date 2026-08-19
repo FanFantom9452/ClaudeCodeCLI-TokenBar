@@ -129,7 +129,7 @@ $sample = @{
     context_window = @{ context_window_size = 1000000; used_percentage = 38 }
     rate_limits = @{
         five_hour = @{ used_percentage = 66; resets_at = (Get-Date).ToUniversalTime().AddMinutes(107).ToString('yyyy-MM-ddTHH:mm:ssZ') }
-        seven_day = @{ used_percentage = 58; resets_at = (Get-Date).ToUniversalTime().AddHours(126).ToString('yyyy-MM-ddTHH:mm:ssZ') }
+        seven_day = @{ used_percentage = 58; resets_at = (Get-Date).ToUniversalTime().AddMinutes(3630).ToString('yyyy-MM-ddTHH:mm:ssZ') }
     }
 } | ConvertTo-Json -Depth 10 -Compress
 $sample | & powershell -NoProfile -ExecutionPolicy Bypass -File $Script

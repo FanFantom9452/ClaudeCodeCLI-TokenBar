@@ -133,7 +133,7 @@ fi
 echo
 echo "Preview:"
 R5=$(perl -e 'my @t=gmtime(time+6420); printf "%04d-%02d-%02dT%02d:%02d:%02dZ",$t[5]+1900,$t[4]+1,$t[3],$t[2],$t[1],$t[0]')
-R7=$(perl -e 'my @t=gmtime(time+453600); printf "%04d-%02d-%02dT%02d:%02d:%02dZ",$t[5]+1900,$t[4]+1,$t[3],$t[2],$t[1],$t[0]')
+R7=$(perl -e 'my @t=gmtime(time+217800); printf "%04d-%02d-%02dT%02d:%02d:%02dZ",$t[5]+1900,$t[4]+1,$t[3],$t[2],$t[1],$t[0]')
 printf '{"cwd":"%s","model":{"id":"claude-opus-5[1m]","display_name":"Opus 5"},"workspace":{"current_dir":"%s"},"context_window":{"context_window_size":1000000,"used_percentage":38},"rate_limits":{"five_hour":{"used_percentage":66,"resets_at":"%s"},"seven_day":{"used_percentage":58,"resets_at":"%s"}}}' \
     "$PWD" "$PWD" "$R5" "$R7" | sh "$SCRIPT"
 echo
