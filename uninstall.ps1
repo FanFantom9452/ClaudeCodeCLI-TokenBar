@@ -15,6 +15,8 @@ $Cfg = if ($env:CLAUDE_CONFIG_DIR)  { $env:CLAUDE_CONFIG_DIR }
        else { throw 'Cannot locate your home directory. Set CLAUDE_CONFIG_DIR and retry.' }
 
 $Script   = Join-Path $Cfg 'statusline.ps1'
+$Updater  = Join-Path $Cfg 'tokenbar-update.ps1'
+$UserCfg  = Join-Path $Cfg 'tokenbar-config.ps1'
 $Settings = Join-Path $Cfg 'settings.json'
 Write-Host "Config dir : $Cfg"
 
@@ -46,14 +48,55 @@ if (Test-Path $Settings) {
     else {
         Write-Host "Nothing    : no statusLine in settings.json"
     }
+
+    # Drop only our own SessionStart entry. Other plugins keep theirs in the same
+    # array, and PreToolUse and friends live in the same object.
+    if ($obj.PSObject.Properties['hooks'] -and $obj.hooks.PSObject.Properties['SessionStart']) {
+        $before = @($obj.hooks.SessionStart)
+        $after  = @($before | Where-Object {
+            -not (@($_.hooks) | Where-Object { $_.command -and $_.command.ToLower().Contains('tokenbar-update') })
+        })
+        if ($after.Count -ne $before.Count) {
+            if ($after.Count) {
+                $obj.hooks | Add-Member -NotePropertyName SessionStart -Force -NotePropertyValue $after
+            } else {
+                # Leaving an empty array behind is litter, and so is an empty hooks
+                # object once it was the only thing in there.
+                $obj.hooks.PSObject.Properties.Remove('SessionStart')
+                if (-not @($obj.hooks.PSObject.Properties).Count) { $obj.PSObject.Properties.Remove('hooks') }
+            }
+            $json = $obj | ConvertTo-Json -Depth 100
+            [System.IO.File]::WriteAllText($Settings, $json, [System.Text.UTF8Encoding]::new($false))
+            Write-Host "Removed    : auto-update hook from settings.json"
+        }
+    }
 }
 else {
     Write-Host "Nothing    : no settings.json found"
 }
 
-if (Test-Path $Script) {
-    Remove-Item -LiteralPath $Script -Force
-    Write-Host "Deleted    : statusline.ps1"
+foreach ($f in @($Script, $Updater, "$Script.bak", "$Updater.bak",
+                 (Join-Path $Cfg '.tokenbar-state.json'),
+                 (Join-Path $Cfg '.tokenbar-update.log'),
+                 (Join-Path $Cfg '.tokenbar-noupdate'))) {
+    if (Test-Path -LiteralPath $f) {
+        Remove-Item -LiteralPath $f -Force
+        Write-Host "Deleted    : $(Split-Path $f -Leaf)"
+    }
+}
+
+# The overrides file is the one thing here that can hold work you did. It is only
+# deleted when every line in it is still a comment, which means nothing was ever
+# set and there is nothing to lose.
+if (Test-Path $UserCfg) {
+    $live = @(Get-Content -LiteralPath $UserCfg | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') })
+    if ($live.Count) {
+        Write-Host "Kept       : tokenbar-config.ps1 has $($live.Count) active line(s), left in place"
+        Write-Host "             $UserCfg"
+    } else {
+        Remove-Item -LiteralPath $UserCfg -Force
+        Write-Host "Deleted    : tokenbar-config.ps1 (nothing was overridden in it)"
+    }
 }
 
 $dump = Join-Path $env:TEMP 'claude-statusline-payload.json'

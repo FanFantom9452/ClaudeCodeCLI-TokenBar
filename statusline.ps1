@@ -4,9 +4,14 @@
 #   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 2d 12h 30m    -6%
 #
 # The three bars are coloured by three different rules on purpose:
-#   ctx  absolute %, thresholds tiered by the model's context window size
+#   ctx  absolute %, thresholds tiered by the model's context window size, plus an
+#        escalating glyph ladder on windows large enough for it to mean something
 #   5h   absolute %, five fixed bands
-#   7d   cumulative deviation from the even 1/7-per-day line, with a floor
+#   7d   pace only -- deviation from the even 1/7-per-day line. How full the bar is
+#        does not colour it; only whether the burn rate reaches the reset does.
+#
+# Every threshold, colour and glyph below can be overridden per machine without
+# touching this file: see the tokenbar-config.ps1 block after the ramps.
 #
 # Payload schema verified against Claude Code 2.1.223.
 
@@ -41,6 +46,14 @@ $segGap   = '    '       # space each side of the · between bars. Keep this wid
 $GREEN = 108; $AMBER = 179; $YELLOW = 226; $RED = 196; $PURPLE = 201
 $CTRACK = 240; $DIM = 240
 
+# Alert glyphs. ConvertFromUtf32, never a [char] cast: both emoji sit above the BMP
+# so they are surrogate pairs, and [char] holds 16 bits and throws on them. They are
+# also double-width, which is why the ladder stops at three -- the statusline has to
+# stay readable in a narrow terminal.
+$WARN  = [char]0x26A0
+$SKULL = [char]::ConvertFromUtf32(0x1F480)
+$BOOM  = [char]::ConvertFromUtf32(0x1F4A5)
+
 # Plugin badges. Each plugin keeps its own hue; brightness within that hue tracks
 # the intensity tier, so the level reads at a glance instead of only from the text
 # suffix. A badge appears at all only when the plugin is installed and has written
@@ -64,11 +77,24 @@ $badgeModes = @{
 # ---- ctx: thresholds tiered by window size ------------------------------
 # A flat 20%-is-yellow rule punishes small windows: 20% of 200k is 40k, which is
 # nothing. First tier whose maxWindow covers the model's window wins.
+#
+# `marks` is an escalating glyph ladder, and only the largest tier carries one. On a
+# 1M window 50% is half a million tokens and the rest of the session gets expensive
+# fast, so escalation earns its noise; on a 200k window those same percentages are
+# small absolute numbers and a skull there would be crying wolf. A tier with no
+# `marks` keeps the single warning glyph at its purple threshold.
+$ctxMarks = @(
+    @{ at = 50; glyph = "$WARN" }
+    @{ at = 60; glyph = "$SKULL" }
+    @{ at = 70; glyph = "$BOOM" }
+    @{ at = 80; glyph = "$BOOM$BOOM" }
+    @{ at = 90; glyph = "$BOOM$BOOM$BOOM" }
+)
 $ctxTiers = @(
     @{ maxWindow =  200000; amber = 50; red = 70; purple = 85 }
     @{ maxWindow =  500000; amber = 40; red = 60; purple = 80 }
     @{ maxWindow =  800000; amber = 30; red = 55; purple = 80 }
-    @{ maxWindow = [double]::MaxValue; amber = 20; red = 50; purple = 80 }
+    @{ maxWindow = [double]::MaxValue; amber = 20; red = 50; purple = 80; marks = $ctxMarks }
 )
 # Gradient inserted between the amber and red thresholds, evenly spaced. On a 1M
 # window (amber 20, red 50) this lands on exactly 20/25/30/35/40/45.
@@ -82,7 +108,7 @@ $ramp5h = @(
     @{ at = 40; color = $AMBER;  sev = 1 }
     @{ at = 60; color = $YELLOW; sev = 2 }
     @{ at = 80; color = $RED;    sev = 3; bold = $true }
-    @{ at = 95; color = $PURPLE; sev = 4; bold = $true; mark = $true }
+    @{ at = 95; color = $PURPLE; sev = 4; bold = $true; mark = "$WARN" }
 )
 
 # ---- 7d: cumulative deviation from the sustainable line -------------------
@@ -95,22 +121,48 @@ $ramp5h = @(
 # Subtraction, not a ratio, so it stays well defined at the very start of a window
 # and needs no grace period: 3% used in the first hour is simply +3, where a ratio
 # would divide by almost zero and read as a 5x overspend.
-$dailyShare = 100 / 7
-$devRamp = @(
-    @{ at = [double]::MinValue; color = $GREEN;  sev = 0 }                # at or under the line
-    @{ at = 1;                  color = $AMBER;  sev = 1 }                # over it
-    @{ at = $dailyShare;        color = $RED;    sev = 3; bold = $true }  # a full day ahead
-    @{ at = 2 * $dailyShare;    color = $PURPLE; sev = 4; bold = $true; mark = $true }
-)
-# Deviation says nothing about headroom: +2 with 95% gone is "on budget" and also
-# nearly empty. This floor is the worse-case override for the bar.
-$floor7d = @(
-    @{ at =  0; color = $GREEN;  sev = 0 }
-    @{ at = 85; color = $RED;    sev = 3; bold = $true }
-    @{ at = 95; color = $PURPLE; sev = 4; bold = $true; mark = $true }
-)
+#
+# There is deliberately no absolute-percentage rule on this bar. 90% used with
+# twelve hours left and a deviation of -3 is a week that went exactly to plan, and
+# painting it red for the size of the number tells you nothing the number itself
+# was not already telling you. What the colour adds is the one thing the digits
+# cannot: whether this rate still reaches the reset.
+$dailyShare  = 100 / 7           # 14.3 points/day, the even line
+$dev7dPurple = 14                # a day's share, rounded to where the digits flip
+$devGradient = @(40, 76, 112, 148, 184, 220, 214, 208, 202)
+# Fractional sev across the gradient so the steps stay ordered against each other,
+# and against any second rule ever compared with Worse.
+$devRamp = @(@{ at = [double]::MinValue; color = $GREEN; sev = 0 })
+for ($i = 0; $i -lt $devGradient.Count; $i++) {
+    $devRamp += @{ at    = $i * ($dev7dPurple / $devGradient.Count)
+                   color = $devGradient[$i]
+                   sev   = 1 + ($i + 1) / ($devGradient.Count + 1) }
+}
+$devRamp += @{ at = $dev7dPurple; color = $PURPLE; sev = 4; bold = $true; mark = "$WARN" }
+
+# No resets_at means no elapsed fraction, so there is no pace to judge. Neutral grey
+# rather than green, because "no reading" and "on budget" must not look alike.
+$dev7dUnknown = @{ color = 245; sev = 0 }
+
+# The single exception to "pace only". At 100% the quota is gone and the deviation
+# has stopped meaning anything -- spend exactly on the line all week and you arrive
+# at 100% with a deviation of 0, which the ramp above would paint green while you
+# are locked out. Set to $null to drop the exception and let pace be the only input.
+$hardStop7d  = 100
+$exhausted7d = @{ color = $PURPLE; sev = 4; bold = $true; mark = "$WARN" }
+
 $weekSeconds = 7 * 24 * 3600     # assumed window length; resets_at is its end
 # -------------------------------------------------------------------------
+
+# Per-machine overrides. Everything above is a default; this file, if it exists,
+# runs last and wins. It is never touched by the updater, so a threshold tuned here
+# survives every upgrade -- which is the whole reason the two are separate files.
+#
+# Resolved without the $ClaudeDir helper below, which is not defined yet, and
+# guarded because a broken config must not take the statusline down with it.
+$tbConfigDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
+$tbConfig = Join-Path $tbConfigDir 'tokenbar-config.ps1'
+if (Test-Path -LiteralPath $tbConfig) { try { . $tbConfig } catch { } }
 
 $ErrorActionPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -150,20 +202,29 @@ function PickStep($ramp, $v) {
     foreach ($s in $ramp) { if ($v -ge $s.at) { $step = $s } }
     return $step
 }
-function Worse($a, $b) { if ($b.sev -gt $a.sev) { $b } else { $a } }
+# Highest matching `at` wins here too, so a ladder must stay sorted ascending.
+# Returns '' when nothing has been passed yet, which is falsy and draws no glyph.
+function MarkFor($ladder, $v) {
+    $glyph = ''
+    foreach ($m in $ladder) { if ($v -ge $m.at) { $glyph = $m.glyph } }
+    return $glyph
+}
 
-# Build the ctx ramp for this model's window: green, then the gradient spread
-# evenly across [amber, red), then red, then purple.
-function CtxRamp($windowSize) {
-    $t = $null
-    foreach ($tier in $ctxTiers) { if ($windowSize -le $tier.maxWindow) { $t = $tier; break } }
+function CtxTier($windowSize) {
+    foreach ($tier in $ctxTiers) { if ($windowSize -le $tier.maxWindow) { return $tier } }
+    return $ctxTiers[-1]
+}
+
+# Build the ctx ramp for one tier: green, then the gradient spread evenly across
+# [amber, red), then red, then purple.
+function CtxRamp($t) {
     $ramp = @(@{ at = 0; color = $GREEN; sev = 0 })
     $span = ($t.red - $t.amber) / $ctxGradient.Count
     for ($i = 0; $i -lt $ctxGradient.Count; $i++) {
         $ramp += @{ at = $t.amber + $i * $span; color = $ctxGradient[$i]; sev = $(if ($i -eq 0) { 1 } else { 2 }) }
     }
     $ramp += @{ at = $t.red;    color = $RED;    sev = 3; bold = $true }
-    $ramp += @{ at = $t.purple; color = $PURPLE; sev = 4; bold = $true; mark = $true }
+    $ramp += @{ at = $t.purple; color = $PURPLE; sev = 4; bold = $true; mark = "$WARN" }
     return $ramp
 }
 
@@ -175,7 +236,10 @@ $eighths = @([char]0x258F, [char]0x258E, [char]0x258D, [char]0x258C,
 $chBlock = [char]0x2588
 $chTrack = [char]0x2591
 
-function Bar($pct, $step) {
+function Bar($pct, $step, $mark) {
+    # $mark left off falls back to whatever the step carries; pass one to override,
+    # which is how the ctx glyph ladder replaces the step's single warning.
+    if ($null -eq $mark) { $mark = $step.mark }
     $pct = [math]::Max(0, [math]::Min(100, [double]$pct))
     $cells   = $pct / 100 * $barWidth
     $nFull   = [int][math]::Floor($cells)
@@ -185,7 +249,7 @@ function Bar($pct, $step) {
     $trackStr = [string]$chTrack * ($barWidth - $nFull - $(if ($nRem -gt 0) { 1 } else { 0 }))
     # Percent padded to 3 columns so the line doesn't shift as digit count changes.
     $bar = (Paint $step $fillStr) + (C $CTRACK $trackStr) + ' ' + (Paint $step ('{0,3}%' -f [math]::Round($pct)))
-    if ($step.mark) { $bar += Paint $step " $([char]0x26A0)" }
+    if ($mark) { $bar += Paint $step " $mark" }
     return $bar
 }
 
@@ -416,8 +480,12 @@ if ($show.context -and $cw.context_window_size -gt 0) {
     if ($null -eq $cw.used_percentage) {
         $l2 += (C $DIM 'ctx ') + (BarPending)
     } else {
-        $step = PickStep (CtxRamp $cw.context_window_size) $cw.used_percentage
-        $l2 += (C $DIM 'ctx ') + (Bar $cw.used_percentage $step)
+        $tier = CtxTier $cw.context_window_size
+        $step = PickStep (CtxRamp $tier) $cw.used_percentage
+        # A tier carrying a ladder replaces the step's own glyph outright, so the
+        # two never both fire and the escalation stays the only thing being read.
+        $mark = if ($tier.marks) { MarkFor $tier.marks $cw.used_percentage } else { $step.mark }
+        $l2 += (C $DIM 'ctx ') + (Bar $cw.used_percentage $step $mark)
     }
 }
 
@@ -454,25 +522,28 @@ if ($show.quota7d) {
     if ($null -eq $q -or $null -eq $q.used_percentage) {
         if ($null -ne $q -or $quotaComing) { $l2 += (C $DIM '7d ') + (BarPending) }
     } else {
-        $step = PickStep $floor7d $q.used_percentage
-        $dev = $null; $devStep = $null
+        $dev = $null
         $left = ResetSpan $q.resets_at
         if ($null -ne $left) {
             $elapsed = [math]::Max(0.0, [math]::Min(1.0, 1 - ($left.TotalSeconds / $weekSeconds)))
             # Round before choosing the colour so the shade always agrees with the
             # digits shown: +0.4 renders as ±0% and must not be coloured as an overrun.
             $dev = [int][math]::Round($q.used_percentage - $elapsed * 100)
-            $devStep = PickStep $devRamp $dev
-            $step = Worse $step $devStep
+            $step = PickStep $devRamp $dev
+        } else {
+            $step = $dev7dUnknown
         }
+        # Quota gone: the deviation has stopped carrying information, so the one
+        # absolute rule on this bar takes over. See $hardStop7d.
+        if ($null -ne $hardStop7d -and $q.used_percentage -ge $hardStop7d) { $step = $exhausted7d }
         $seg = (C $DIM '7d ') + (Bar $q.used_percentage $step)
         if ($null -ne $left) { $seg += C $DIM "$fieldGap$([char]0x21BB) $(FmtSpan $left 'dhm')" }
         if ($show.delta -and $null -ne $dev) {
             $txt = if ($dev -gt 0) { "+$dev%" } elseif ($dev -lt 0) { "$dev%" } else { "$([char]0xB1)0%" }
-            # Painted with its own severity, not the bar's. The bar can be purple for
-            # being nearly empty while the deviation itself is only mildly over, and
-            # colouring the number purple too would overstate what it measures.
-            $seg += $fieldGap + (Paint $devStep $txt)
+            # Same style as the bar. With the floor gone the bar *is* the deviation,
+            # so painting the number separately would invent a second reading that
+            # does not exist.
+            $seg += $fieldGap + (Paint $step $txt)
         }
         $l2 += $seg
     }

@@ -5,9 +5,14 @@
 #   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 2d 12h 30m    -6%
 #
 # The three bars are coloured by three different rules on purpose:
-#   ctx  absolute %, thresholds tiered by the model's context window size
+#   ctx  absolute %, thresholds tiered by the model's context window size, plus an
+#        escalating glyph ladder on windows large enough for it to mean something
 #   5h   absolute %, five fixed bands
-#   7d   cumulative deviation from the even 1/7-per-day line, with a floor
+#   7d   pace only -- deviation from the even 1/7-per-day line. How full the bar is
+#        does not colour it; only whether the burn rate reaches the reset does.
+#
+# Every threshold, colour and glyph below can be overridden per machine from
+# tokenbar-config.sh without touching this file.
 #
 # Needs perl (JSON::PP and Time::Local are core modules, so nothing to install)
 # and awk. Payload schema verified against Claude Code 2.1.223.
@@ -34,9 +39,42 @@ FIELD_GAP="   "    # space between a bar's % and the ↻reset / ±delta that fol
 SEG_GAP="    "     # space each side of the · between bars. Keep this wider than
                    # FIELD_GAP, or fields inside a segment look further apart than
                    # the segments themselves and the grouping reads backwards.
+
+# ---- colours and thresholds ---------------------------------------------
+# ctx tiers, maxwindow:amber:red:purple. First tier whose maxwindow covers the
+# window wins. A flat 20%-is-yellow rule punishes small windows: 20% of 200k is
+# 40k, which is nothing.
+CTX_TIERS="200000:50:70:85,500000:40:60:80,800000:30:55:80,999999999:20:50:80"
+# Gradient inserted between amber and red, evenly spaced.
+CTX_GRADIENT="226,220,214,208,202,203"
+# Escalating glyph ladder, and only windows above CTX_MARK_MINWINDOW carry one. On
+# a 1M window 50% is half a million tokens and the rest of the session gets
+# expensive fast, so escalation earns its noise; on a 200k window those same
+# percentages are small absolute numbers and a skull there would be crying wolf.
+# Smaller windows keep the single warning glyph at their purple threshold.
+CTX_MARKS="50:⚠,60:💀,70:💥,80:💥💥,90:💥💥💥"
+CTX_MARK_MINWINDOW=800000
+# 5h: five fixed bands, at:colour:bold. No deviation figure -- the window is only
+# five hours, work arrives in bursts, and a rate over that span jitters too much.
+RAMP_5H="0:108:0,40:179:0,60:226:0,80:196:1,95:201:1"
+RAMP_5H_MARK=95
+# 7d: pace only. There is deliberately no absolute-percentage rule here. 90% used
+# with twelve hours left and a deviation of -3 is a week that went to plan, and
+# painting it red for the size of the number says nothing the number did not.
+DEV_GRADIENT="40,76,112,148,184,220,214,208,202"
+DEV_7D_PURPLE=14        # a day's share of the week, rounded to where digits flip
+DEV_7D_UNKNOWN=245      # no resets_at means no pace to judge: grey, never green
+# The one exception to pace-only: at 100% the quota is gone and the deviation has
+# stopped meaning anything. Empty to switch it off.
+HARD_STOP_7D=100
+PURPLE_COL=201
+WARN_GLYPH="⚠"
 # -------------------------------------------------------------------------
 
 CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+# Per-machine overrides run last and win. Never touched by the updater, so a
+# threshold tuned here survives every upgrade -- which is why they are two files.
+[ -r "$CFG/tokenbar-config.sh" ] && . "$CFG/tokenbar-config.sh"
 ESC=$(printf '\033')
 
 payload=$(cat)
@@ -280,61 +318,72 @@ printf '%s' "$fields" | awk -F'\t' \
     -v esc="$ESC" -v badges="$badges" -v branch="$branch" \
     -v barw="$BAR_WIDTH" -v gap="$FIELD_GAP" -v seggap="$SEG_GAP" \
     -v s_model="$SHOW_MODEL" -v s_dir="$SHOW_DIR" -v s_ctx="$SHOW_CONTEXT" \
-    -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_delta="$SHOW_DELTA" '
+    -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_delta="$SHOW_DELTA"     -v ctxtiers="$CTX_TIERS" -v ctxgrad="$CTX_GRADIENT"     -v ctxmarks="$CTX_MARKS" -v ctxmarkmin="$CTX_MARK_MINWINDOW"     -v ramp5h="$RAMP_5H" -v ramp5hmark="$RAMP_5H_MARK"     -v devgrad="$DEV_GRADIENT" -v dev7dpurple="$DEV_7D_PURPLE"     -v dev7dunknown="$DEV_7D_UNKNOWN" -v hardstop7d="$HARD_STOP_7D"     -v purplecol="$PURPLE_COL" -v warnglyph="$WARN_GLYPH" '
 function paint(t)  { return esc "[" (BOLD ? "1;" : "") "38;5;" COL "m" t esc "[0m" }
 function dim(t)    { return esc "[38;5;240m" t esc "[0m" }
 function tint(c,t) { return esc "[38;5;" c "m" t esc "[0m" }
 
 # --- ctx: thresholds tiered by window size. A flat 20%-is-yellow rule punishes
 # small windows: 20% of 200k is 40k, which is nothing.
-function ctx_style(p, w,   g, span, i) {
-    if      (w <= 200000) { amber=50; red=70; purple=85 }
-    else if (w <= 500000) { amber=40; red=60; purple=80 }
-    else if (w <= 800000) { amber=30; red=55; purple=80 }
-    else                  { amber=20; red=50; purple=80 }
-    if      (p >= purple) { COL=201; BOLD=1; MARK=1 }
-    else if (p >= red)    { COL=196; BOLD=1; MARK=0 }
+function ctx_style(p, w,   t, a, g, ng, n, i, span) {
+    n = split(ctxtiers, t, ",")
+    for (i = 1; i <= n; i++) { split(t[i], a, ":"); if (w <= a[1] + 0) break }
+    if (i > n) i = n
+    split(t[i], a, ":")
+    amber = a[2] + 0; red = a[3] + 0; purple = a[4] + 0
+    if      (p >= purple) { COL = purplecol + 0; BOLD = 1 }
+    else if (p >= red)    { COL = 196; BOLD = 1 }
     else if (p >= amber) {
         # Gradient spread evenly across [amber, red). On a 1M window this lands
         # on exactly 20/25/30/35/40/45.
-        g[1]=226; g[2]=220; g[3]=214; g[4]=208; g[5]=202; g[6]=203
-        span=(red-amber)/6
-        i=int((p-amber)/span)+1; if (i>6) i=6
-        COL=g[i]; BOLD=0; MARK=0
+        ng = split(ctxgrad, g, ",")
+        span = (red - amber) / ng
+        i = int((p - amber) / span) + 1; if (i > ng) i = ng
+        COL = g[i] + 0; BOLD = 0
     }
-    else { COL=108; BOLD=0; MARK=0 }
+    else { COL = 108; BOLD = 0 }
+    # A window carrying a ladder replaces the single glyph outright, so the two
+    # never both fire and the escalation stays the only thing being read.
+    if (w > ctxmarkmin + 0) MARK = mark_for(ctxmarks, p)
+    else                    MARK = (p >= purple) ? warnglyph : ""
+}
+# Highest matching threshold wins, so a ladder must stay sorted ascending. Returns
+# an empty string when nothing has been passed yet, which draws no glyph.
+function mark_for(ladder, v,   a, b, n, i, glyph) {
+    glyph = ""
+    n = split(ladder, a, ",")
+    for (i = 1; i <= n; i++) { split(a[i], b, ":"); if (v >= b[1] + 0) glyph = b[2] }
+    return glyph
 }
 
-# --- 5h: five fixed bands. No deviation figure — the window is only 5 hours,
-# work arrives in bursts, and a rate over that span jitters too much to read.
-function q5_style(p) {
-    if      (p >= 95) { COL=201; BOLD=1; MARK=1 }
-    else if (p >= 80) { COL=196; BOLD=1; MARK=0 }
-    else if (p >= 60) { COL=226; BOLD=0; MARK=0 }
-    else if (p >= 40) { COL=179; BOLD=0; MARK=0 }
-    else              { COL=108; BOLD=0; MARK=0 }
+# --- 5h: five fixed bands from RAMP_5H. No deviation figure — the window is only
+# 5 hours, work arrives in bursts, and a rate over that span jitters too much to read.
+function q5_style(p,   t, a, n, i) {
+    n = split(ramp5h, t, ",")
+    COL = 108; BOLD = 0
+    for (i = 1; i <= n; i++) {
+        split(t[i], a, ":")
+        if (p >= a[1] + 0) { COL = a[2] + 0; BOLD = a[3] + 0 }
+    }
+    MARK = (p >= ramp5hmark + 0) ? warnglyph : ""
 }
 
 # --- 7d: how many quota points you are ahead of the even 1/7-per-day line.
 # Subtraction, not a ratio, so it stays well defined at the very start of a window
 # and needs no grace period: 3% used in the first hour is simply +3, where a ratio
 # would divide by almost zero and read as a 5x overspend.
-function sev_dev(d,   ds) {
-    ds = 100 / 7
-    if (d >= 2 * ds) return 4      # two full days ahead
-    if (d >= ds)     return 3      # a full day ahead
-    if (d >= 1)      return 1      # over the line
-    return 0                       # at or under it
-}
-# Deviation says nothing about headroom: +2 with 95% gone is "on budget" and also
-# nearly empty. This floor is the worse-case override for the bar.
-function sev_abs7(p) { if (p >= 95) return 4; if (p >= 85) return 3; return 0 }
-function style_of_sev(s) {
-    if      (s == 4) { COL=201; BOLD=1; MARK=1 }
-    else if (s == 3) { COL=196; BOLD=1; MARK=0 }
-    else if (s == 2) { COL=226; BOLD=0; MARK=0 }
-    else if (s == 1) { COL=179; BOLD=0; MARK=0 }
-    else             { COL=108; BOLD=0; MARK=0 }
+#
+# There is deliberately no absolute-percentage rule on this bar. What the colour
+# adds is the one thing the digits cannot: whether this rate reaches the reset.
+function dev_style(d,   g, n, span, i) {
+    if (d >= dev7dpurple + 0) { COL = purplecol + 0; BOLD = 1; MARK = warnglyph; return }
+    BOLD = 0; MARK = ""
+    # Banked time is one flat green: below the line there are no degrees of safe.
+    if (d < 0) { COL = 108; return }
+    n = split(devgrad, g, ",")
+    span = (dev7dpurple + 0) / n
+    i = int(d / span) + 1; if (i > n) i = n; if (i < 1) i = 1
+    COL = g[i] + 0
 }
 
 # Eighth-block bar: 8 sub-steps per cell, so 10 cells resolve ~80 levels.
@@ -352,7 +401,7 @@ function bar(p,   e, cells, nf, nr, fill, track, i, out) {
     for (i = 0; i < barw - nf - (nr > 0 ? 1 : 0); i++) track = track "░"
     # Percent padded to 3 columns so the line does not shift as digit count changes.
     out = paint(fill) tint(240, track) " " paint(sprintf("%3d%%", int(p + 0.5)))
-    if (MARK) out = out paint(" ⚠")
+    if (MARK != "") out = out paint(" " MARK)
     return out
 }
 
@@ -432,7 +481,6 @@ function fmtspan(sec, units,   d, h, m, tot) {
         if (q7p < 0) {
             l2[++n2] = dim("7d ") bar_pending()
         } else {
-            sev = sev_abs7(q7p)
             havedev = 0
             if (q7r > 0) {
                 # elapsed fraction of the assumed 7-day window; resets_at is its end
@@ -443,21 +491,27 @@ function fmtspan(sec, units,   d, h, m, tot) {
                 # the digits shown: +0.4 renders as ±0% and must not read as an
                 # overrun.
                 dev = int(raw + (raw >= 0 ? 0.5 : -0.5))
-                devsev = sev_dev(dev)
-                if (devsev > sev) sev = devsev
+                dev_style(dev)
                 havedev = 1
+            } else {
+                # No resets_at means no elapsed fraction and so no pace to judge.
+                # Grey rather than green: no reading and on budget must not look alike.
+                COL = dev7dunknown + 0; BOLD = 0; MARK = ""
             }
-            style_of_sev(sev)
+            # Quota gone: the deviation has stopped carrying information, since
+            # spending exactly on the line all week arrives at 100 with a deviation
+            # of 0, which would paint green while you are locked out.
+            if (hardstop7d != "" && q7p >= hardstop7d + 0) {
+                COL = purplecol + 0; BOLD = 1; MARK = warnglyph
+            }
             seg = dim("7d ") bar(q7p)
             if (q7r > 0) seg = seg dim(gap "↻ " fmtspan(q7r - nowt, "dhm"))
             if (s_delta == "1" && havedev) {
-                # Painted with its own severity rather than the severity of the
-                # bar. The bar can be purple for being nearly empty while the
-                # deviation is only mildly over, and colouring the number purple
-                # too would overstate what it measures. NOTE: no apostrophes
-                # anywhere inside this awk program - it is single-quoted in the
-                # shell, so one would end it here.
-                style_of_sev(devsev)
+                # Same style as the bar, which bar() left in COL/BOLD. With the floor
+                # gone the bar is the deviation, so painting the number separately
+                # would invent a second reading that does not exist. NOTE: no
+                # apostrophes anywhere inside this awk program - it is single-quoted
+                # in the shell, so one would end it here.
                 seg = seg gap paint(dev > 0 ? sprintf("+%d%%", dev) : (dev < 0 ? sprintf("%d%%", dev) : "±0%"))
             }
             l2[++n2] = seg

@@ -29,6 +29,13 @@ which shell you're in first.
 Restart Claude Code afterwards. The installer finds your home directory itself,
 backs up `settings.json` before merging, and prints a preview to prove it works.
 
+The bootstrap URL points at `main` because it has to point at something stable, but
+what it *installs* is the **latest tagged release** — the installer asks GitHub for
+that tag first and downloads the statusline from it. That is the same ref
+[auto-update](#auto-update) follows, so a fresh install and an updated one land on
+the same code. Until a release exists it falls back to `main` and says so in its
+`Version :` line.
+
 Prefer to read before running? `curl -fsSL <the install.sh URL> -o install.sh`, read it, then `sh install.sh`.
 
 ## Uninstall
@@ -45,9 +52,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 curl -fsSL https://raw.githubusercontent.com/FanFantom9452/ClaudeCodeCLI-TokenBar/main/uninstall.sh | sh
 ```
 
-Removes the script and its `statusLine` entry, nothing else. If you've since
-pointed `statusLine` at a different tool, it says so and leaves it alone rather
-than deleting config it never owned. Backups stay at `settings.json.bak.*`.
+Removes the script, the updater, its `statusLine` entry and its `SessionStart` hook —
+nothing else. Other plugins' hooks in the same arrays are left alone. If you've since
+pointed `statusLine` at a different tool, it says so and leaves it alone rather than
+deleting config it never owned. `tokenbar-config.*` survives if you actually set
+something in it. Backups stay at `settings.json.bak.*`.
 
 ## Line 1: git state
 
@@ -95,7 +104,7 @@ Each bar is coloured by a different rule, because each one means something diffe
 |---|---|---|
 | `ctx` | absolute %, thresholds tiered by window size | 20% of a 1M window is roomy; 20% of 200k is not |
 | `5h` | absolute %, five fixed bands | 5-hour window, work comes in bursts — a rate figure would just jitter |
-| `7d` | how far **ahead of or behind** the even 1/7-per-day line you are | tells you if you're on track to survive the week, not just how much is gone |
+| `7d` | how far **ahead of or behind** the even 1/7-per-day line you are — the percentage does not colour it at all | tells you if you're on track to survive the week, not just how much is gone |
 
 `ctx` can go back down (`/compact`, new session). Quotas only climb until they reset —
 that's why the `↻` countdown sits on the quota bars, not on `ctx`.
@@ -110,6 +119,17 @@ that's why the `↻` countdown sits on the quota bars, not on `ctx`.
 | >800k | 20% | 50% | 80% |
 
 Between yellow and red, six gradient steps. On a 1M window those land on 20/25/30/35/40/45%.
+
+**Glyph ladder, windows over 800k only:**
+
+| ≥50% | ≥60% | ≥70% | ≥80% | ≥90% |
+|---|---|---|---|---|
+| ⚠ | 💀 | 💥 | 💥💥 | 💥💥💥 |
+
+Smaller windows keep a single ⚠ at their purple threshold. On a 1M window 50% is half
+a million tokens and everything after it gets expensive fast, so the escalation earns
+its noise. On a 200k window those same percentages are small absolute numbers, and a
+skull there would be crying wolf.
 
 ### 5h bands
 
@@ -128,7 +148,10 @@ A week split evenly is 100/7 = **14.3 points per day**. So `-10%` means you've
 banked ten points, `±0%` is dead on the line, and `+35%` means you're two and a
 half days' worth ahead of schedule.
 
-green ≤0 · amber over the line · **red a full day ahead (+14)** · **purple two days ahead (+29) ⚠**
+Below the line is one flat green — under budget has no degrees. From `±0` to `+14` the
+bar walks a nine-step gradient, and `+14` or worse is **purple with a ⚠**: fourteen
+points is one full day's share, so you are a whole day ahead of a pace you cannot
+sustain.
 
 It's cumulative, not per-day, and that's the point: a heavy Monday followed by
 frugal days walks the number back toward zero. A single-day figure would keep
@@ -138,16 +161,49 @@ Subtraction rather than a ratio also means it needs no special case at the start
 a window. 3% used in the first hour is simply `+3`; a ratio would divide by almost
 zero and scream about a 5× overspend.
 
-**Absolute floor**: ≥85% used colours the bar red and ≥95% purple no matter what the
-deviation says — `+2%` with 95% gone is honestly "on budget" and also nearly empty.
-The bar shows the worse of the two; the number keeps its own colour, so it never
-overstates what it actually measures.
+**There is no absolute-percentage rule on this bar**, and that is deliberate. 90% used
+with twelve hours left and a deviation of `-3` is a week that went exactly to plan;
+painting it red for the size of the number tells you nothing the number was not
+already telling you. The bar and the `±%` share one colour, because after the floor
+was dropped they are the same reading.
+
+The single exception is **100%**. The quota is gone and the deviation has stopped
+meaning anything — spend exactly on the line all week and you arrive at 100% with a
+deviation of `0`, which the ramp would paint green while you are locked out. So 100%
+is purple regardless. Set `$hardStop7d` / `HARD_STOP_7D` empty to drop even that.
+
+One consequence worth knowing before you install: at 95% used with a day left and a
+deviation of `+9`, this bar is orange, not red. It is telling you the truth about your
+*pace*; the `95%` next to it is telling you the truth about your *headroom*. Read both.
 
 ## Customise
 
-Toggle block sits at the top of the installed script — `~/.claude/statusline.ps1` or
-`~/.claude/statusline.sh`. Flip a segment off, change `barWidth`, move a threshold,
-edit the colour ramps.
+Edit `~/.claude/tokenbar-config.ps1` (or `tokenbar-config.sh`). Every threshold,
+colour, glyph and toggle is listed there, commented out, with its default. Uncomment
+what you want to change.
+
+That file is separate from the statusline for one reason: **the updater overwrites
+`statusline.ps1` and never touches your config**. Tune a threshold in the statusline
+itself and the next update erases it.
+
+Flip a segment off, change `barWidth`, move a threshold, redefine a colour ramp,
+delete the glyph ladder.
+
+### Seeing an edit before you live with it
+
+```
+powershell -NoProfile -File preview.ps1     # Windows
+sh preview.sh                               # Linux / macOS
+```
+
+Renders the real statusline against synthetic payloads across every band — each ctx
+tier swept end to end, the 5h boundaries, a spread of 7d deviations, and four
+full lines. It runs the *installed* script, so it picks your config up exactly as
+Claude Code would; pass `-Script` / a path argument to preview a working copy first.
+
+Handy because the states you most want to check are the ones you cannot summon on
+demand — nobody wants to burn 90% of a weekly quota to find out whether they like
+the colour.
 
 Segments: `caveman` `ponytail` `toggles` `model` `dir` `branch` `gitAhead` `gitLines`
 `gitUntrk` `context` `quota5h` `quota7d` `delta`
@@ -156,6 +212,51 @@ Segments: `caveman` `ponytail` `toggles` `model` `dir` `branch` `gitAhead` `gitL
 Every git segment hides itself when there's nothing to say, so a clean tree on an
 up-to-date branch renders as just `main`. Turn `gitLines` off and the old `main*`
 dirty marker comes back instead.
+
+## Auto-update
+
+The installer adds a `SessionStart` hook that keeps the statusline current. It checks
+**once a day at most**, and only ever follows **tagged releases** — never `main`.
+
+The hook process itself does nothing but read a local timestamp. Only when a check is
+actually due does it detach a worker for the network part, so starting a session never
+waits on GitHub.
+
+Before anything replaces a working statusline the download has to clear three gates:
+big enough to be the script, recognisably the script, and syntactically valid. The old
+file is kept as `statusline.ps1.bak` either way.
+
+| | |
+|---|---|
+| Turn it off | `touch ~/.claude/.tokenbar-noupdate` |
+| Never install it | set `TOKENBAR_NO_AUTOUPDATE=1` before running the installer |
+| See why one failed | `~/.claude/.tokenbar-update.log` — only written when something goes wrong |
+| Roll back | `~/.claude/statusline.ps1.bak` |
+
+Auto-update is a channel for code to run on your machine. Requiring a deliberate tag
+means a half-finished push cannot reach you on its own, and the config file staying
+separate means an update cannot quietly revert your thresholds. It is not signed —
+the threat model here is a bad commit, not a compromised account. If that is not the
+threat model you want, turn it off with the opt-out file above.
+
+The updater replaces `statusline.ps1` only. If the updater itself changes, re-run the
+installer.
+
+### Cutting a release
+
+Auto-update reads GitHub's `releases/latest`, which a pushed tag alone does **not**
+satisfy — a tag is not a release. Publish one and every installed copy picks it up
+within a day:
+
+```sh
+git tag -a v1.1.0 -m "what changed"
+git push origin v1.1.0
+gh release create v1.1.0 --title v1.1.0 --notes "what changed"   # or the web UI
+```
+
+Nothing reaches anyone until that last line runs. That is the point of following
+releases rather than `main`: publishing is a separate, deliberate act, so a pushed
+commit — or a pushed tag you meant to reconsider — cannot ship itself.
 
 ## Requirements
 
