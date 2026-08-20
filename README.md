@@ -4,7 +4,7 @@ Two-line Claude Code statusline. Context window and account quota as usage bars.
 
 ```
 [CAVEMAN:FULL] | [PONYTAIL:FULL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
-ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 2d 12h 30m    -6%
+ctx ███▊░░░░░░  38%  │  5h ██████▌░░░  66%  ↻ 1h 46m  │  7d █████▊░░░░  58%  ↻ 2d 12h 30m   -6%
 ```
 
 ## Install

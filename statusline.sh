@@ -2,7 +2,7 @@
 # ClaudeCodeCLI-TokenBar — Claude Code statusline (Linux / macOS)
 #
 #   line 1  [CAVEMAN:FULL] [PONYTAIL:FULL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
-#   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 2d 12h 30m    -6%
+#   line 2  ctx ███▊░░░░░░  38%  │  5h ██████▌░░░  66%  ↻ 1h 46m  │  7d █████▊░░░░  58%  ↻ 2d 12h 30m   -6%
 #
 # The three bars are coloured by three different rules on purpose:
 #   ctx  absolute %, thresholds tiered by the model's context window size, plus an
@@ -33,12 +33,16 @@ SHOW_QUOTA7D=1     # 7d bar
 SHOW_DELTA=1       # +2% / -10% next to the 7d bar: quota points ahead of (or
                    # behind) the even 1/7-per-day line
 BAR_WIDTH=10       # cells per bar; shared so the three compare by eye
-FIELD_GAP="   "    # space between a bar's % and the ↻reset / ±delta that follow it.
+FIELD_GAP="  "     # space between a bar's % and the ↻reset / ±delta that follow it.
                    # One space reads as glued to the number, since the % itself
                    # already sits two spaces off the bar.
-SEG_GAP="    "     # space each side of the · between bars. Keep this wider than
-                   # FIELD_GAP, or fields inside a segment look further apart than
-                   # the segments themselves and the grouping reads backwards.
+SEG_GAP="  "       # space each side of SEG_SEP between bars. Keep the separator
+                   # plus both its gaps wider than FIELD_GAP, or fields inside a
+                   # segment look further apart than the segments themselves and
+                   # the grouping reads backwards.
+SEG_SEP="│"        # what sits between two bars. A rule with vertical extent
+                   # separates at a narrower gap than a mid-dot does, which is
+                   # what lets SEG_GAP sit at 2 without the bars merging.
 
 # ---- colours and thresholds ---------------------------------------------
 # ctx tiers, maxwindow:amber:red:purple. First tier whose maxwindow covers the
@@ -316,7 +320,7 @@ fi
 
 printf '%s' "$fields" | awk -F'\t' \
     -v esc="$ESC" -v badges="$badges" -v branch="$branch" \
-    -v barw="$BAR_WIDTH" -v gap="$FIELD_GAP" -v seggap="$SEG_GAP" \
+    -v barw="$BAR_WIDTH" -v gap="$FIELD_GAP" -v seggap="$SEG_GAP" -v segsep="$SEG_SEP" \
     -v s_model="$SHOW_MODEL" -v s_dir="$SHOW_DIR" -v s_ctx="$SHOW_CONTEXT" \
     -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_delta="$SHOW_DELTA"     -v ctxtiers="$CTX_TIERS" -v ctxgrad="$CTX_GRADIENT"     -v ctxmarks="$CTX_MARKS" -v ctxmarkmin="$CTX_MARK_MINWINDOW"     -v ramp5h="$RAMP_5H" -v ramp5hmark="$RAMP_5H_MARK"     -v devgrad="$DEV_GRADIENT" -v dev7dpurple="$DEV_7D_PURPLE"     -v dev7dunknown="$DEV_7D_UNKNOWN" -v hardstop7d="$HARD_STOP_7D"     -v purplecol="$PURPLE_COL" -v warnglyph="$WARN_GLYPH" '
 function paint(t)  { return esc "[" (BOLD ? "1;" : "") "38;5;" COL "m" t esc "[0m" }
@@ -521,6 +525,6 @@ function fmtspan(sec, units,   d, h, m, tot) {
     out = ""
     for (i = 1; i <= n1; i++) out = out (i > 1 ? dim(" | ") : "") l1[i]
     if (n1 > 0 && n2 > 0) out = out "\n"
-    for (i = 1; i <= n2; i++) out = out (i > 1 ? dim(seggap "·" seggap) : "") l2[i]
+    for (i = 1; i <= n2; i++) out = out (i > 1 ? dim(seggap segsep seggap) : "") l2[i]
     printf "%s", out
 }'

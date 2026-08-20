@@ -1,4 +1,4 @@
-# ClaudeCodeCLI-TokenBar — per-machine overrides (Windows / PowerShell)
+﻿# ClaudeCodeCLI-TokenBar — per-machine overrides (Windows / PowerShell)
 #
 # statusline.ps1 defines every value below as a default and then dot-sources this
 # file, so whatever you set here wins. The updater replaces statusline.ps1 and
@@ -28,8 +28,11 @@
 
 # ---- layout -------------------------------------------------------------
 # $barWidth = 10      # cells per bar; shared so the three compare by eye
-# $fieldGap = '   '   # between a bar's % and the reset/delta that follow it
-# $segGap   = '    '  # each side of the · between bars; keep wider than $fieldGap
+# $fieldGap = '  '         # between a bar's % and the reset/delta that follow it
+# $segGap   = '  '         # each side of $segSep; separator plus both gaps should
+#                          # stay wider than $fieldGap or the grouping reads backwards
+# $segSep   = [char]0x2502 # what sits between two bars. [char]0xB7 is the mid-dot,
+#                          # which needs a wider $segGap (4) to read as a separator
 
 # ---- palette (256-colour indices) ---------------------------------------
 # $GREEN = 108; $AMBER = 179; $YELLOW = 226; $RED = 196; $PURPLE = 201

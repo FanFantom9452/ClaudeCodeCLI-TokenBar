@@ -1,7 +1,7 @@
 ﻿# ClaudeCodeCLI-TokenBar — Claude Code statusline (Windows / PowerShell)
 #
 #   line 1  [CAVEMAN:FULL] [PONYTAIL:FULL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
-#   line 2  ctx ███▊░░░░░░  38%    ·    5h ██████▌░░░  66%   ↻ 1h 46m    ·    7d █████▊░░░░  58%   ↻ 2d 12h 30m    -6%
+#   line 2  ctx ███▊░░░░░░  38%  │  5h ██████▌░░░  66%  ↻ 1h 46m  │  7d █████▊░░░░  58%  ↻ 2d 12h 30m   -6%
 #
 # The three bars are coloured by three different rules on purpose:
 #   ctx  absolute %, thresholds tiered by the model's context window size, plus an
@@ -33,13 +33,16 @@ $show = @{
                          # (or behind) the even 1/7-per-day line
 }
 $barWidth = 10           # cells per bar; shared so the three compare by eye
-$fieldGap = '   '        # space between a bar's % and the ↻reset / ±delta that
+$fieldGap = '  '         # space between a bar's % and the ↻reset / ±delta that
                          # follow it. One space reads as glued to the number,
                          # since the % itself already sits two spaces off the bar.
-$segGap   = '    '       # space each side of the · between bars. Keep this wider
-                         # than $fieldGap, or fields inside a segment look further
-                         # apart than the segments themselves and the grouping
-                         # reads backwards.
+$segGap   = '  '         # space each side of $segSep between bars. Keep the
+                         # separator plus both its gaps wider than $fieldGap, or
+                         # fields inside a segment look further apart than the
+                         # segments themselves and the grouping reads backwards.
+$segSep   = [char]0x2502 # what sits between two bars. A rule with vertical extent
+                         # separates at a narrower gap than a mid-dot does, which
+                         # is what lets $segGap sit at 2 without the bars merging.
 
 # 256-colour palette. sev ranks severity so two rules can be compared and the
 # worse one wins; without it there'd be no way to order "yellow" against "red".
@@ -551,5 +554,5 @@ if ($show.quota7d) {
 
 $lines = @()
 if ($l1.Count) { $lines += ($l1 -join (C $DIM ' | ')) }
-if ($l2.Count) { $lines += ($l2 -join (C $DIM "$segGap$([char]0xB7)$segGap")) }
+if ($l2.Count) { $lines += ($l2 -join (C $DIM "$segGap$segSep$segGap")) }
 [Console]::Write($lines -join "`n")

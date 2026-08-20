@@ -25,8 +25,11 @@
 
 # ---- layout -------------------------------------------------------------
 # BAR_WIDTH=10
-# FIELD_GAP="   "
-# SEG_GAP="    "
+# FIELD_GAP="  "
+# SEG_GAP="  "     # each side of SEG_SEP; separator plus both gaps should stay
+#                  # wider than FIELD_GAP or the grouping reads backwards
+# SEG_SEP="│"      # what sits between two bars. "·" needs a wider SEG_GAP (4)
+#                  # to read as a separator
 
 # ---- ctx: thresholds tiered by window size ------------------------------
 # maxwindow:amber:red:purple, first tier covering the window wins. A flat
