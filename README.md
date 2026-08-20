@@ -103,37 +103,60 @@ Each bar is coloured by a different rule, because each one means something diffe
 | Bar | Rule | Why |
 |---|---|---|
 | `ctx` | absolute %, thresholds tiered by window size | 20% of a 1M window is roomy; 20% of 200k is not |
-| `5h` | absolute %, five fixed bands | 5-hour window, work comes in bursts — a rate figure would just jitter |
+| `5h` | absolute % | 5-hour window, work comes in bursts — a rate figure would just jitter |
 | `7d` | how far **ahead of or behind** the even 1/7-per-day line you are — the percentage does not colour it at all | tells you if you're on track to survive the week, not just how much is gone |
 
 `ctx` can go back down (`/compact`, new session). Quotas only climb until they reset —
 that's why the `↻` countdown sits on the quota bars, not on `ctx`.
 
-### ctx thresholds
+### One green, three bars
 
-| Window | yellow | red | purple |
-|---|---|---|---|
-| ≤200k | 50% | 70% | 85% |
-| ≤500k | 40% | 60% | 80% |
-| ≤800k | 30% | 55% | 80% |
-| >800k | 20% | 50% | 80% |
+All three walk the same path through the 256-colour cube, so the colour means the
+same thing wherever you see it:
 
-Between yellow and red, six gradient steps. On a 1M window those land on 20/25/30/35/40/45%.
+```
+ 46  →  83  →  120  →  157  →  194  →  yellow  →  red  →  201
+deep green ....... palest green         heating          the gate
+```
+
+The greens are one line through the cube: `46` is `r0 g5 b0`, the most saturated
+green there is, and each step adds equal red and blue, walking it toward white
+without letting the hue drift. **Deep green is room to spare. Palest green is
+exactly on budget.** What differs between the bars is only *where* along that path
+each percentage lands.
+
+### ctx
+
+Each window size carries its own ramp, because the same percentage means different
+things: 20% of a 1M window is 200k — a whole small window — while 20% of 200k is
+nothing.
+
+| Window | palest green | yellow | red | purple |
+|---|---|---|---|---|
+| ≤200k | 40% | 50% | 70% | 85% |
+| ≤500k | 32% | 40% | 60% | 80% |
+| ≤800k | 24% | 30% | 55% | 80% |
+| >800k | 20% | 40% | 50% | 80% |
+
+Between those points the ramp fills in every step, so the bar shades continuously
+rather than jumping between four states.
 
 **Glyph ladder, windows over 800k only:**
 
-| ≥50% | ≥60% | ≥70% | ≥80% | ≥90% |
+| ≥50% | ≥65% | ≥75% | ≥85% | ≥90% |
 |---|---|---|---|---|
-| ⚠ | 💀 | 💥 | 💥💥 | 💥💥💥 |
+| ⚠ | 💥 | 💥💥 | 💥💥💥 | 💀 |
 
 Smaller windows keep a single ⚠ at their purple threshold. On a 1M window 50% is half
 a million tokens and everything after it gets expensive fast, so the escalation earns
 its noise. On a 200k window those same percentages are small absolute numbers, and a
 skull there would be crying wolf.
 
-### 5h bands
+### 5h
 
-green <40% · amber 40% · yellow 60% · **red 80%** · **purple 95% ⚠**
+Same shape, thresholds at palest green 40% · yellow 60% · **red 80%** ·
+**purple 95% ⚠**. No deviation figure: the window is only five hours, work arrives in
+bursts, and a rate over that span jitters too much to read.
 
 ### 7d deviation
 
@@ -148,10 +171,18 @@ A week split evenly is 100/7 = **14.3 points per day**. So `-10%` means you've
 banked ten points, `±0%` is dead on the line, and `+35%` means you're two and a
 half days' worth ahead of schedule.
 
-Below the line is one flat green — under budget has no degrees. From `±0` to `+14` the
-bar walks a nine-step gradient, and `+14` or worse is **purple with a ⚠**: fourteen
-points is one full day's share, so you are a whole day ahead of a pace you cannot
-sustain.
+This bar is coloured by that number and by nothing else — how full it is does not
+enter into it. Banked time gets the deep greens, `±0` is the palest, and above the
+line it heats up:
+
+| deviation | | |
+|---|---|---|
+| `+7` | ⚠ | half a day burned ahead of the line — easing off for an afternoon stops being enough |
+| `+10` | 💥 | most of a day |
+| `+14` | 💀 | a full day ahead of a pace you cannot sustain. Purple, and the gate |
+
+The glyph rides with the `±%` figure rather than the bar's `used%`, because that is
+the number it is about.
 
 It's cumulative, not per-day, and that's the point: a heavy Monday followed by
 frugal days walks the number back toward zero. A single-day figure would keep
@@ -161,20 +192,18 @@ Subtraction rather than a ratio also means it needs no special case at the start
 a window. 3% used in the first hour is simply `+3`; a ratio would divide by almost
 zero and scream about a 5× overspend.
 
-**There is no absolute-percentage rule on this bar**, and that is deliberate. 90% used
-with twelve hours left and a deviation of `-3` is a week that went exactly to plan;
-painting it red for the size of the number tells you nothing the number was not
-already telling you. The bar and the `±%` share one colour, because after the floor
-was dropped they are the same reading.
+**There is almost no absolute-percentage rule on this bar**, and that is deliberate.
+90% used with twelve hours left and a deviation of `-3` is a week that went exactly to
+plan; painting it red for the size of the number tells you nothing the number was not
+already telling you. The bar and the `±%` share one colour, because they are the same
+reading.
 
-The single exception is **100%**. The quota is gone and the deviation has stopped
-meaning anything — spend exactly on the line all week and you arrive at 100% with a
-deviation of `0`, which the ramp would paint green while you are locked out. So 100%
-is purple regardless. Set `$hardStop7d` / `HARD_STOP_7D` empty to drop even that.
-
-One consequence worth knowing before you install: at 95% used with a day left and a
-deviation of `+9`, this bar is orange, not red. It is telling you the truth about your
-*pace*; the `95%` next to it is telling you the truth about your *headroom*. Read both.
+The one exception is **95%**. Past there the deviation has stopped carrying
+information: with under a twentieth of the quota left, whether you are marginally
+ahead or behind no longer changes what you can do. Spend exactly on the line all week
+and you arrive at 95% with a deviation of `0`, which the ramp would paint palest green
+while you are nearly locked out. So 95% and up is purple regardless. Set `$hardStop7d`
+/ `HARD_STOP_7D` empty to drop even that.
 
 ## Customise
 
@@ -197,9 +226,10 @@ sh preview.sh                               # Linux / macOS
 ```
 
 Renders the real statusline against synthetic payloads across every band — each ctx
-tier swept end to end, the 5h boundaries, a spread of 7d deviations, and four
-full lines. It runs the *installed* script, so it picks your config up exactly as
-Claude Code would; pass `-Script` / a path argument to preview a working copy first.
+tier swept end to end in 5% steps, the same for 5h, every 7d deviation from -14 to
++14, the special cases, and four full lines. It runs the *installed* script, so it
+picks your config up exactly as Claude Code would; pass `-Script` / a path argument
+to preview a working copy first.
 
 Handy because the states you most want to check are the ones you cannot summon on
 demand — nobody wants to burn 90% of a weekly quota to find out whether they like

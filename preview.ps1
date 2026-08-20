@@ -60,25 +60,39 @@ function Add-Sample($section, $label, $note, $ctxSize, $ctxPct, $q5, $q7, $dev) 
     })
 }
 
+# Every 5% across every tier, so a threshold that lands in an odd place has nowhere
+# to hide. The notes mark where each tier's own thresholds sit.
+$ctxTierNotes = @{
+    '200k' = @{ 40 = 'palest green'; 50 = 'yellow'; 70 = 'red'; 85 = 'purple + warn' }
+    '500k' = @{ 32 = 'palest green'; 40 = 'yellow'; 60 = 'red'; 80 = 'purple + warn' }
+    '800k' = @{ 24 = 'palest green'; 30 = 'yellow'; 55 = 'red'; 80 = 'purple + warn' }
+    '1M'   = @{ 20 = 'palest green'; 40 = 'yellow'; 50 = 'red + warn'; 65 = 'boom'
+                75 = 'boom x2'; 80 = 'purple'; 85 = 'boom x3'; 90 = 'skull' }
+}
 foreach ($t in @(@{n='200k';w=200000}, @{n='500k';w=500000}, @{n='800k';w=800000}, @{n='1M';w=1000000})) {
-    foreach ($p in 10,40,50,55,60,70,80,85,90,95,100) {
-        Add-Sample "ctx $($t.n) window" "$($t.n)  $p%" '' $t.w $p $null $null 0
+    foreach ($p in 0..20 | ForEach-Object { $_ * 5 }) {
+        Add-Sample "ctx $($t.n) window" ('{0,4}%' -f $p) $ctxTierNotes[$t.n][$p] $t.w $p $null $null 0
     }
 }
-foreach ($p in 20,39,40,59,60,79,80,94,95,100) { Add-Sample '5h' "5h  $p%" '' 200000 10 $p $null 0 }
+$h5Notes = @{ 0 = 'green'; 40 = 'amber'; 60 = 'yellow'; 80 = 'red'; 95 = 'purple + warn' }
+foreach ($p in 0..20 | ForEach-Object { $_ * 5 }) {
+    Add-Sample '5h' ('{0,4}%' -f $p) $h5Notes[$p] 200000 10 $p $null 0
+}
+# Every deviation the ramp distinguishes, held at one used% so only the colour moves.
+$devNotes = @{ -14 = 'a full day banked, deepest green'
+                 0 = 'dead on the even line, palest green'
+                 5 = 'yellow from here'
+                 8 = 'orange-red from here'
+                14 = 'a day ahead: the purple gate' }
+foreach ($d in -14..14) {
+    Add-Sample '7d  deviation sweep' ('dev {0,3}' -f $d) $devNotes[$d] 200000 10 $null 55 $d
+}
 foreach ($c in @(
-    @{p=30;  d=-14; n='a full day banked'}
-    @{p=45;  d= -5; n='comfortably under'}
     @{p=90;  d= -3; n='90% used, still on pace'}
-    @{p=55;  d=  0; n='dead on the line'}
-    @{p=50;  d=  3; n='slightly over'}
-    @{p=48;  d=  7; n='half a day ahead'}
-    @{p=60;  d= 11; n='nearly a day ahead'}
-    @{p=70;  d= 14; n='a full day ahead'}
-    @{p=62;  d= 20; n='well past sustainable'}
     @{p=97;  d= -1; n='nearly empty, on pace'}
+    @{p=62;  d= 20; n='well past sustainable'}
     @{p=100; d=  0; n='quota gone (hard stop)'}
-)) { Add-Sample '7d' ("7d  {0}%  dev {1}" -f $c.p, $c.d) $c.n 200000 10 $null $c.p $c.d }
+)) { Add-Sample '7d  special cases' ("7d  {0}%  dev {1}" -f $c.p, $c.d) $c.n 200000 10 $null $c.p $c.d }
 Add-Sample 'full line' 'quiet'    '' 1000000 22 30 25   2
 Add-Sample 'full line' 'mid-week' '' 1000000 48 66 58  -6
 Add-Sample 'full line' 'pressed'  '' 1000000 72 88 71  15

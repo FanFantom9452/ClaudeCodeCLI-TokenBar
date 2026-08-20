@@ -45,32 +45,45 @@ SEG_SEP="│"        # what sits between two bars. A rule with vertical extent
                    # what lets SEG_GAP sit at 2 without the bars merging.
 
 # ---- colours and thresholds ---------------------------------------------
-# ctx tiers, maxwindow:amber:red:purple. First tier whose maxwindow covers the
-# window wins. A flat 20%-is-yellow rule punishes small windows: 20% of 200k is
-# 40k, which is nothing.
-CTX_TIERS="200000:50:70:85,500000:40:60:80,800000:30:55:80,999999999:20:50:80"
-# Gradient inserted between amber and red, evenly spaced.
-CTX_GRADIENT="226,220,214,208,202,203"
+# ctx tiers, pipe separated. Each is maxwindow;purple;ramp, where ramp is a list of
+# used%:colour or used%:colour:bold, lowest first. First tier whose maxwindow covers
+# the window wins. Tiers differ because the same percentage means different things:
+# 20% of a 1M window is 200k, a whole small window, while 20% of 200k is nothing.
+# Same story as the 7d bar -- green desaturates as the window fills, palest where it
+# stops being roomy, then yellow, red, and into the magenta gate.
+CTX_TIERS="200000;85;0:46,10:83,20:120,30:157,40:194,45:190,50:226,55:220,60:214,65:208,70:196:1,75:198:1,80:200:1|500000;80;0:46,8:83,16:120,24:157,32:194,36:190,40:226,45:220,50:214,55:208,60:196:1,65:198:1,70:199:1,75:200:1|800000;80;0:46,6:83,12:120,18:157,24:194,27:190,30:226,36:220,42:214,48:208,55:196:1,62:198:1,70:199:1,75:200:1|999999999;80;0:46,5:83,10:120,15:157,20:194,25:193,30:192,35:190,40:226,45:214,50:196:1,55:197:1,60:198:1,65:199:1,70:200:1,75:201:1"
 # Escalating glyph ladder, and only windows above CTX_MARK_MINWINDOW carry one. On
 # a 1M window 50% is half a million tokens and the rest of the session gets
 # expensive fast, so escalation earns its noise; on a 200k window those same
 # percentages are small absolute numbers and a skull there would be crying wolf.
 # Smaller windows keep the single warning glyph at their purple threshold.
-CTX_MARKS="50:⚠,60:💀,70:💥,80:💥💥,90:💥💥💥"
+CTX_MARKS="50:⚠,65:💥,75:💥💥,85:💥💥💥,90:💀"
 CTX_MARK_MINWINDOW=800000
-# 5h: five fixed bands, at:colour:bold. No deviation figure -- the window is only
-# five hours, work arrives in bursts, and a rate over that span jitters too much.
-RAMP_5H="0:108:0,40:179:0,60:226:0,80:196:1,95:201:1"
+# 5h: at:colour:bold, lowest first. No deviation figure -- the window is only five
+# hours, work arrives in bursts, and a rate over that span jitters too much. Same
+# path as ctx and 7d: green desaturates as the window fills, palest at 40, then
+# yellow, red, and the gate.
+RAMP_5H="0:46:0,10:83:0,20:120:0,30:157:0,40:194:0,45:193:0,50:192:0,55:190:0,60:226:0,65:220:0,70:214:0,75:208:0,80:196:1,85:197:1,90:199:1,95:201:1"
 RAMP_5H_MARK=95
 # 7d: pace only. There is deliberately no absolute-percentage rule here. 90% used
 # with twelve hours left and a deviation of -3 is a week that went to plan, and
 # painting it red for the size of the number says nothing the number did not.
-DEV_GRADIENT="40,76,112,148,184,220,214,208,202"
+# deviation:colour, lowest first. Both halves gradient: below the line green
+# desaturates as the banked buffer is spent (46 is r0 g5 b0, the most saturated
+# green in the cube; each step adds equal red and blue to walk it toward white
+# without the hue drifting). At the line the green is palest. Above it blue falls
+# away first, then red climbs into yellow, then blue climbs back to carry red
+# toward the magenta gate.
+DEV_RAMP="-999:46,-10:83,-7:120,-3:157,0:194,1:193,2:192,3:191,4:190,5:226,6:214,7:202,8:196,9:197,10:198,11:199,12:200,13:201"
 DEV_7D_PURPLE=14        # a day's share of the week, rounded to where digits flip
+# Glyph ladder on pace, read in days rather than percent: 7 is half a day burned
+# ahead of the line -- where easing off for an afternoon stops being enough -- 10 is
+# most of a day, and 14 is a full day, which is also the gate.
+DEV_MARKS="7:⚠,10:💥,14:💀"
 DEV_7D_UNKNOWN=245      # no resets_at means no pace to judge: grey, never green
 # The one exception to pace-only: at 100% the quota is gone and the deviation has
 # stopped meaning anything. Empty to switch it off.
-HARD_STOP_7D=100
+HARD_STOP_7D=95
 PURPLE_COL=201
 WARN_GLYPH="⚠"
 # -------------------------------------------------------------------------
@@ -322,30 +335,27 @@ printf '%s' "$fields" | awk -F'\t' \
     -v esc="$ESC" -v badges="$badges" -v branch="$branch" \
     -v barw="$BAR_WIDTH" -v gap="$FIELD_GAP" -v seggap="$SEG_GAP" -v segsep="$SEG_SEP" \
     -v s_model="$SHOW_MODEL" -v s_dir="$SHOW_DIR" -v s_ctx="$SHOW_CONTEXT" \
-    -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_delta="$SHOW_DELTA"     -v ctxtiers="$CTX_TIERS" -v ctxgrad="$CTX_GRADIENT"     -v ctxmarks="$CTX_MARKS" -v ctxmarkmin="$CTX_MARK_MINWINDOW"     -v ramp5h="$RAMP_5H" -v ramp5hmark="$RAMP_5H_MARK"     -v devgrad="$DEV_GRADIENT" -v dev7dpurple="$DEV_7D_PURPLE"     -v dev7dunknown="$DEV_7D_UNKNOWN" -v hardstop7d="$HARD_STOP_7D"     -v purplecol="$PURPLE_COL" -v warnglyph="$WARN_GLYPH" '
+    -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_delta="$SHOW_DELTA"     -v ctxtiers="$CTX_TIERS"     -v ctxmarks="$CTX_MARKS" -v ctxmarkmin="$CTX_MARK_MINWINDOW"     -v ramp5h="$RAMP_5H" -v ramp5hmark="$RAMP_5H_MARK"     -v devramp="$DEV_RAMP" -v dev7dpurple="$DEV_7D_PURPLE"     -v devmarks="$DEV_MARKS" -v dev7dunknown="$DEV_7D_UNKNOWN" -v hardstop7d="$HARD_STOP_7D"     -v purplecol="$PURPLE_COL" -v warnglyph="$WARN_GLYPH" '
 function paint(t)  { return esc "[" (BOLD ? "1;" : "") "38;5;" COL "m" t esc "[0m" }
 function dim(t)    { return esc "[38;5;240m" t esc "[0m" }
 function tint(c,t) { return esc "[38;5;" c "m" t esc "[0m" }
 
 # --- ctx: thresholds tiered by window size. A flat 20%-is-yellow rule punishes
 # small windows: 20% of 200k is 40k, which is nothing.
-function ctx_style(p, w,   t, a, g, ng, n, i, span) {
-    n = split(ctxtiers, t, ",")
-    for (i = 1; i <= n; i++) { split(t[i], a, ":"); if (w <= a[1] + 0) break }
+function ctx_style(p, w,   t, f, g, kv, n, m, i, purple) {
+    n = split(ctxtiers, t, "|")
+    for (i = 1; i <= n; i++) { split(t[i], f, ";"); if (w <= f[1] + 0) break }
     if (i > n) i = n
-    split(t[i], a, ":")
-    amber = a[2] + 0; red = a[3] + 0; purple = a[4] + 0
-    if      (p >= purple) { COL = purplecol + 0; BOLD = 1 }
-    else if (p >= red)    { COL = 196; BOLD = 1 }
-    else if (p >= amber) {
-        # Gradient spread evenly across [amber, red). On a 1M window this lands
-        # on exactly 20/25/30/35/40/45.
-        ng = split(ctxgrad, g, ",")
-        span = (red - amber) / ng
-        i = int((p - amber) / span) + 1; if (i > ng) i = ng
-        COL = g[i] + 0; BOLD = 0
+    split(t[i], f, ";")
+    purple = f[2] + 0
+    # Highest matching used% wins, so each tier ramp must stay sorted ascending.
+    COL = 108; BOLD = 0
+    m = split(f[3], g, ",")
+    for (i = 1; i <= m; i++) {
+        split(g[i], kv, ":")
+        if (p >= kv[1] + 0) { COL = kv[2] + 0; BOLD = (kv[3] == "1") ? 1 : 0 }
     }
-    else { COL = 108; BOLD = 0 }
+    if (p >= purple) { COL = purplecol + 0; BOLD = 1 }
     # A window carrying a ladder replaces the single glyph outright, so the two
     # never both fire and the escalation stays the only thing being read.
     if (w > ctxmarkmin + 0) MARK = mark_for(ctxmarks, p)
@@ -360,7 +370,7 @@ function mark_for(ladder, v,   a, b, n, i, glyph) {
     return glyph
 }
 
-# --- 5h: five fixed bands from RAMP_5H. No deviation figure — the window is only
+# --- 5h: absolute %, bands from RAMP_5H. No deviation figure — the window is only
 # 5 hours, work arrives in bursts, and a rate over that span jitters too much to read.
 function q5_style(p,   t, a, n, i) {
     n = split(ramp5h, t, ",")
@@ -379,15 +389,18 @@ function q5_style(p,   t, a, n, i) {
 #
 # There is deliberately no absolute-percentage rule on this bar. What the colour
 # adds is the one thing the digits cannot: whether this rate reaches the reset.
-function dev_style(d,   g, n, span, i) {
-    if (d >= dev7dpurple + 0) { COL = purplecol + 0; BOLD = 1; MARK = warnglyph; return }
-    BOLD = 0; MARK = ""
-    # Banked time is one flat green: below the line there are no degrees of safe.
-    if (d < 0) { COL = 108; return }
-    n = split(devgrad, g, ",")
-    span = (dev7dpurple + 0) / n
-    i = int(d / span) + 1; if (i > n) i = n; if (i < 1) i = 1
-    COL = g[i] + 0
+function dev_style(d,   parts, n, i, kv, col) {
+    MARK = mark_for(devmarks, d)
+    if (d >= dev7dpurple + 0) { COL = purplecol + 0; BOLD = 1; return }
+    BOLD = 0
+    # Highest matching deviation wins, so DEV_RAMP must stay sorted ascending.
+    n = split(devramp, parts, ",")
+    col = 108
+    for (i = 1; i <= n; i++) {
+        split(parts[i], kv, ":")
+        if (d >= kv[1] + 0) col = kv[2] + 0
+    }
+    COL = col
 }
 
 # Eighth-block bar: 8 sub-steps per cell, so 10 cells resolve ~80 levels.
@@ -505,18 +518,31 @@ function fmtspan(sec, units,   d, h, m, tot) {
             # Quota gone: the deviation has stopped carrying information, since
             # spending exactly on the line all week arrives at 100 with a deviation
             # of 0, which would paint green while you are locked out.
+            # Its glyph only fills in when the ladder had nothing to say, so a skull
+            # is never demoted back to a warning.
             if (hardstop7d != "" && q7p >= hardstop7d + 0) {
-                COL = purplecol + 0; BOLD = 1; MARK = warnglyph
+                COL = purplecol + 0; BOLD = 1
+                if (MARK == "") MARK = warnglyph
             }
+            # The glyph belongs to the deviation, not to how full the bar is, so it
+            # rides with the +/-n% figure whenever that figure is on screen. Beside
+            # the used% it would read as a comment on the used%, which is the one
+            # thing this bar deliberately does not judge.
+            devshown = (s_delta == "1" && havedev)
+            glyph = MARK
+            if (devshown) MARK = ""
             seg = dim("7d ") bar(q7p)
+            MARK = glyph
             if (q7r > 0) seg = seg dim(gap "↻ " fmtspan(q7r - nowt, "dhm"))
-            if (s_delta == "1" && havedev) {
+            if (devshown) {
                 # Same style as the bar, which bar() left in COL/BOLD. With the floor
                 # gone the bar is the deviation, so painting the number separately
                 # would invent a second reading that does not exist. NOTE: no
                 # apostrophes anywhere inside this awk program - it is single-quoted
                 # in the shell, so one would end it here.
-                seg = seg gap paint(dev > 0 ? sprintf("+%d%%", dev) : (dev < 0 ? sprintf("%d%%", dev) : "±0%"))
+                devtxt = dev > 0 ? sprintf("+%d%%", dev) : (dev < 0 ? sprintf("%d%%", dev) : "±0%")
+                if (glyph != "") devtxt = devtxt " " glyph
+                seg = seg gap paint(devtxt)
             }
             l2[++n2] = seg
         }

@@ -44,9 +44,11 @@ $segSep   = [char]0x2502 # what sits between two bars. A rule with vertical exte
                          # separates at a narrower gap than a mid-dot does, which
                          # is what lets $segGap sit at 2 without the bars merging.
 
-# 256-colour palette. sev ranks severity so two rules can be compared and the
-# worse one wins; without it there'd be no way to order "yellow" against "red".
-$GREEN = 108; $AMBER = 179; $YELLOW = 226; $RED = 196; $PURPLE = 201
+# 256-colour palette. Only the two ends are named: every ramp below spells its own
+# colours out as cube indices, because a gradient is a path through the cube and a
+# name for each step would say less than the number does. sev ranks severity so two
+# rules can be compared and the worse one wins.
+$RED = 196; $PURPLE = 201
 $CTRACK = 240; $DIM = 240
 
 # Alert glyphs. ConvertFromUtf32, never a [char] cast: both emoji sit above the BMP
@@ -88,30 +90,107 @@ $badgeModes = @{
 # `marks` keeps the single warning glyph at its purple threshold.
 $ctxMarks = @(
     @{ at = 50; glyph = "$WARN" }
-    @{ at = 60; glyph = "$SKULL" }
-    @{ at = 70; glyph = "$BOOM" }
-    @{ at = 80; glyph = "$BOOM$BOOM" }
-    @{ at = 90; glyph = "$BOOM$BOOM$BOOM" }
+    @{ at = 65; glyph = "$BOOM" }
+    @{ at = 75; glyph = "$BOOM$BOOM" }
+    @{ at = 85; glyph = "$BOOM$BOOM$BOOM" }
+    @{ at = 90; glyph = "$SKULL" }
 )
+# Each tier carries its own ramp of at:colour steps, lowest first, and the tiers
+# differ because the same percentage means different things: 20% of a 1M window is
+# 200k, a whole small window, while 20% of 200k is nothing. Same story as the 7d
+# bar -- green desaturates along the cube diagonal as the window fills, palest at
+# the point where it stops being roomy, then blue drops out into yellow, red comes
+# up, and blue climbs back to carry red into the magenta gate.
 $ctxTiers = @(
-    @{ maxWindow =  200000; amber = 50; red = 70; purple = 85 }
-    @{ maxWindow =  500000; amber = 40; red = 60; purple = 80 }
-    @{ maxWindow =  800000; amber = 30; red = 55; purple = 80 }
-    @{ maxWindow = [double]::MaxValue; amber = 20; red = 50; purple = 80; marks = $ctxMarks }
+    @{ maxWindow = 200000; purple = 85; steps = @(
+        @{ at =   0; color =  46 }
+        @{ at =  10; color =  83 }
+        @{ at =  20; color = 120 }
+        @{ at =  30; color = 157 }
+        @{ at =  40; color = 194 }
+        @{ at =  45; color = 190 }
+        @{ at =  50; color = 226 }
+        @{ at =  55; color = 220 }
+        @{ at =  60; color = 214 }
+        @{ at =  65; color = 208 }
+        @{ at =  70; color = 196; bold = $true }
+        @{ at =  75; color = 198; bold = $true }
+        @{ at =  80; color = 200; bold = $true }
+    ) }
+    @{ maxWindow = 500000; purple = 80; steps = @(
+        @{ at =   0; color =  46 }
+        @{ at =   8; color =  83 }
+        @{ at =  16; color = 120 }
+        @{ at =  24; color = 157 }
+        @{ at =  32; color = 194 }
+        @{ at =  36; color = 190 }
+        @{ at =  40; color = 226 }
+        @{ at =  45; color = 220 }
+        @{ at =  50; color = 214 }
+        @{ at =  55; color = 208 }
+        @{ at =  60; color = 196; bold = $true }
+        @{ at =  65; color = 198; bold = $true }
+        @{ at =  70; color = 199; bold = $true }
+        @{ at =  75; color = 200; bold = $true }
+    ) }
+    @{ maxWindow = 800000; purple = 80; steps = @(
+        @{ at =   0; color =  46 }
+        @{ at =   6; color =  83 }
+        @{ at =  12; color = 120 }
+        @{ at =  18; color = 157 }
+        @{ at =  24; color = 194 }
+        @{ at =  27; color = 190 }
+        @{ at =  30; color = 226 }
+        @{ at =  36; color = 220 }
+        @{ at =  42; color = 214 }
+        @{ at =  48; color = 208 }
+        @{ at =  55; color = 196; bold = $true }
+        @{ at =  62; color = 198; bold = $true }
+        @{ at =  70; color = 199; bold = $true }
+        @{ at =  75; color = 200; bold = $true }
+    ) }
+    @{ maxWindow = [double]::MaxValue; purple = 80; marks = $ctxMarks; steps = @(
+        @{ at =   0; color =  46 }
+        @{ at =   5; color =  83 }
+        @{ at =  10; color = 120 }
+        @{ at =  15; color = 157 }
+        @{ at =  20; color = 194 }
+        @{ at =  25; color = 193 }
+        @{ at =  30; color = 192 }
+        @{ at =  35; color = 190 }
+        @{ at =  40; color = 226 }
+        @{ at =  45; color = 214 }
+        @{ at =  50; color = 196; bold = $true }
+        @{ at =  55; color = 197; bold = $true }
+        @{ at =  60; color = 198; bold = $true }
+        @{ at =  65; color = 199; bold = $true }
+        @{ at =  70; color = 200; bold = $true }
+        @{ at =  75; color = 201; bold = $true }
+    ) }
 )
-# Gradient inserted between the amber and red thresholds, evenly spaced. On a 1M
-# window (amber 20, red 50) this lands on exactly 20/25/30/35/40/45.
-$ctxGradient = @(226, 220, 214, 208, 202, 203)
 
-# ---- 5h: five fixed bands ------------------------------------------------
+# ---- 5h: absolute %, same shape as the other two --------------------------
 # No deviation figure here: the window is only 5 hours, work arrives in bursts,
-# and a rate over that span jitters too much to read.
+# and a rate over that span jitters too much to read. The colour walks the same
+# path as ctx and 7d -- green desaturating along the cube diagonal as the window
+# fills, palest at 40 where it stops being roomy, then yellow, red, and the gate.
 $ramp5h = @(
-    @{ at =  0; color = $GREEN;  sev = 0 }
-    @{ at = 40; color = $AMBER;  sev = 1 }
-    @{ at = 60; color = $YELLOW; sev = 2 }
-    @{ at = 80; color = $RED;    sev = 3; bold = $true }
-    @{ at = 95; color = $PURPLE; sev = 4; bold = $true; mark = "$WARN" }
+    @{ at =   0; color =  46; sev = 0.0 }
+    @{ at =  10; color =  83; sev = 0.2 }
+    @{ at =  20; color = 120; sev = 0.4 }
+    @{ at =  30; color = 157; sev = 0.6 }
+    @{ at =  40; color = 194; sev = 0.8 }
+    @{ at =  45; color = 193; sev = 1.0 }
+    @{ at =  50; color = 192; sev = 1.2 }
+    @{ at =  55; color = 190; sev = 1.4 }
+    @{ at =  60; color = 226; sev = 1.6 }
+    @{ at =  65; color = 220; sev = 1.8 }
+    @{ at =  70; color = 214; sev = 2.0 }
+    @{ at =  75; color = 208; sev = 2.2 }
+    @{ at =  80; color = 196; bold = $true; sev = 2.4 }
+    @{ at =  85; color = 197; bold = $true; sev = 2.6 }
+    @{ at =  90; color = 199; bold = $true; sev = 2.8 }
+    @{ at =  95; color = $PURPLE; sev = 4; bold = $true; mark = "$WARN" }
 )
 
 # ---- 7d: cumulative deviation from the sustainable line -------------------
@@ -132,14 +211,49 @@ $ramp5h = @(
 # cannot: whether this rate still reaches the reset.
 $dailyShare  = 100 / 7           # 14.3 points/day, the even line
 $dev7dPurple = 14                # a day's share, rounded to where the digits flip
-$devGradient = @(40, 76, 112, 148, 184, 220, 214, 208, 202)
-# Fractional sev across the gradient so the steps stay ordered against each other,
-# and against any second rule ever compared with Worse.
-$devRamp = @(@{ at = [double]::MinValue; color = $GREEN; sev = 0 })
-for ($i = 0; $i -lt $devGradient.Count; $i++) {
-    $devRamp += @{ at    = $i * ($dev7dPurple / $devGradient.Count)
-                   color = $devGradient[$i]
-                   sev   = 1 + ($i + 1) / ($devGradient.Count + 1) }
+# Both halves of the line get a gradient. Below it, green desaturates as the banked
+# buffer is spent: 46 is the most saturated green in the 6x6x6 cube (r0 g5 b0), and
+# each step adds equal red and blue, walking it toward white without letting the hue
+# drift off green. At the line itself the green is at its palest -- on budget should
+# read as unremarkable, not as an achievement. Above the line blue falls away first
+# (194 down to 190), then red climbs into yellow, and past +8 blue climbs back to
+# carry red toward magenta, so approaching a full day ahead visibly approaches the
+# colour it ends at.
+$devSteps = @(
+    @{ at = [double]::MinValue; color =  46 }   # a full day or more still banked
+    @{ at = -10; color =  83 }
+    @{ at =  -7; color = 120 }
+    @{ at =  -3; color = 157 }
+    @{ at =   0; color = 194 }                  # on the line: palest green
+    @{ at =   1; color = 193 }
+    @{ at =   2; color = 192 }
+    @{ at =   3; color = 191 }
+    @{ at =   4; color = 190 }
+    @{ at =   5; color = 226 }                  # yellow
+    @{ at =   6; color = 214 }
+    @{ at =   7; color = 202 }                  # red from here, half a day ahead
+    @{ at =   8; color = 196 }
+    @{ at =   9; color = 197 }
+    @{ at =  10; color = 198 }
+    @{ at =  11; color = 199 }
+    @{ at =  12; color = 200 }
+    @{ at =  13; color = 201 }
+)
+# Fractional sev so the steps stay ordered against each other. Anything at or below
+# the line is 0; above it, sev climbs toward the gate.
+# Glyph ladder on pace, read in days rather than percent: 7 is half a day burned
+# ahead of the line -- the point where easing off for an afternoon stops being
+# enough -- 10 is most of a day, and 14 is a full day, which is also the gate.
+$devMarks = @(
+    @{ at =  7; glyph = "$WARN" }
+    @{ at = 10; glyph = "$BOOM" }
+    @{ at = 14; glyph = "$SKULL" }
+)
+$devRamp = @()
+foreach ($s in $devSteps) {
+    $sev = 0
+    if ($s.at -ge 0) { $sev = 1 + $s.at / ($dev7dPurple + 1) }
+    $devRamp += @{ at = $s.at; color = $s.color; sev = $sev }
 }
 $devRamp += @{ at = $dev7dPurple; color = $PURPLE; sev = 4; bold = $true; mark = "$WARN" }
 
@@ -149,9 +263,9 @@ $dev7dUnknown = @{ color = 245; sev = 0 }
 
 # The single exception to "pace only". At 100% the quota is gone and the deviation
 # has stopped meaning anything -- spend exactly on the line all week and you arrive
-# at 100% with a deviation of 0, which the ramp above would paint green while you
+# at 95% with a deviation of 0, which the ramp above would paint green while you
 # are locked out. Set to $null to drop the exception and let pace be the only input.
-$hardStop7d  = 100
+$hardStop7d  = 95
 $exhausted7d = @{ color = $PURPLE; sev = 4; bold = $true; mark = "$WARN" }
 
 $weekSeconds = 7 * 24 * 3600     # assumed window length; resets_at is its end
@@ -221,12 +335,13 @@ function CtxTier($windowSize) {
 # Build the ctx ramp for one tier: green, then the gradient spread evenly across
 # [amber, red), then red, then purple.
 function CtxRamp($t) {
-    $ramp = @(@{ at = 0; color = $GREEN; sev = 0 })
-    $span = ($t.red - $t.amber) / $ctxGradient.Count
-    for ($i = 0; $i -lt $ctxGradient.Count; $i++) {
-        $ramp += @{ at = $t.amber + $i * $span; color = $ctxGradient[$i]; sev = $(if ($i -eq 0) { 1 } else { 2 }) }
+    # sev only has to stay ordered, so it is just the step index scaled under the
+    # purple gate's 4.
+    $ramp = @()
+    for ($i = 0; $i -lt $t.steps.Count; $i++) {
+        $s = $t.steps[$i]
+        $ramp += @{ at = $s.at; color = $s.color; bold = $s.bold; sev = 3.0 * $i / $t.steps.Count }
     }
-    $ramp += @{ at = $t.red;    color = $RED;    sev = 3; bold = $true }
     $ramp += @{ at = $t.purple; color = $PURPLE; sev = 4; bold = $true; mark = "$WARN" }
     return $ramp
 }
@@ -536,13 +651,26 @@ if ($show.quota7d) {
         } else {
             $step = $dev7dUnknown
         }
+        # The ladder is driven by pace, so it is empty when there is no pace to read.
+        $mark = if ($null -ne $dev) { MarkFor $devMarks $dev } else { '' }
         # Quota gone: the deviation has stopped carrying information, so the one
-        # absolute rule on this bar takes over. See $hardStop7d.
-        if ($null -ne $hardStop7d -and $q.used_percentage -ge $hardStop7d) { $step = $exhausted7d }
-        $seg = (C $DIM '7d ') + (Bar $q.used_percentage $step)
+        # absolute rule on this bar takes over. See $hardStop7d. Its glyph only fills
+        # in when the ladder has nothing to say, so a skull is never demoted.
+        if ($null -ne $hardStop7d -and $q.used_percentage -ge $hardStop7d) {
+            $step = $exhausted7d
+            if (-not $mark) { $mark = $step.mark }
+        }
+        # The glyph belongs to the deviation, not to how full the bar is, so it rides
+        # with the +/-n% figure whenever that figure is on screen. Left beside the
+        # used% it would read as a comment on the used%, which is the one thing this
+        # bar deliberately does not judge.
+        $showDelta = $show.delta -and $null -ne $dev
+        $barMark = if ($showDelta) { '' } else { $mark }
+        $seg = (C $DIM '7d ') + (Bar $q.used_percentage $step $barMark)
         if ($null -ne $left) { $seg += C $DIM "$fieldGap$([char]0x21BB) $(FmtSpan $left 'dhm')" }
-        if ($show.delta -and $null -ne $dev) {
+        if ($showDelta) {
             $txt = if ($dev -gt 0) { "+$dev%" } elseif ($dev -lt 0) { "$dev%" } else { "$([char]0xB1)0%" }
+            if ($mark) { $txt += " $mark" }
             # Same style as the bar. With the floor gone the bar *is* the deviation,
             # so painting the number separately would invent a second reading that
             # does not exist.
