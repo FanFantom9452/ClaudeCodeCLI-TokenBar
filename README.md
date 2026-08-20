@@ -360,3 +360,26 @@ caveman and ponytail additionally have to name a mode those plugins actually hav
 Unknown toggles use a neutral gray-to-white ramp. Give one its own hue by adding an
 entry to `$badgeColors` / `colors_for` in the installed script. Turn them all off
 with the `toggles` segment; `caveman` and `ponytail` keep their own switches.
+
+### Toggles whose flag holds a state, not a level
+
+Not every plugin writes an intensity. One that writes which step it's on, or which
+phase, or that something needs your attention, has nothing for the four tiers to
+say — and a badge whose colour never moves is a badge you stop reading.
+
+Name the colour after the word itself and it wins over the tiers, which stay as the
+fallback for anything not listed:
+
+```powershell
+# ~/.claude/tokenbar-config.ps1
+$badgeColors.review = @{ off = 240; lite = 245; full = 250; ultra = 255
+                         draft = 60; ready = 75; blocked = 196 }
+```
+
+```sh
+# ~/.claude/tokenbar-config.sh
+WORD_COLORS="review:draft=60 review:ready=75 review:blocked=196"
+```
+
+Keep the four tiers in the hashtable even when every word is spelled out: a plugin
+that grows a mode you haven't coloured yet still has to render.

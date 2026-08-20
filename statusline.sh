@@ -232,6 +232,27 @@ colors_for() {
         *)        printf '%s' "$DEFAULT_COLORS" ;;
     esac
 }
+# Colours keyed by the exact mode word, as space-separated name:word=color triples.
+# Not every plugin writes a level into its flag: one whose flag carries a state — a
+# pipeline stage, a phase, a warning — has nothing for the four tiers above to say,
+# and a state that never changes colour is a badge that stops being read. An exact
+# word is matched first and the tiers stay as the fallback, so this costs the two
+# plugins above nothing.
+#
+# Set in tokenbar-config.sh, which is why the default is written to keep whatever
+# was sourced there rather than to overwrite it:
+#
+#   WORD_COLORS="review:draft=60 review:ready=75 review:blocked=196"
+WORD_COLORS="${WORD_COLORS:-}"
+
+word_color() {
+    for pair in $WORD_COLORS; do
+        case "$pair" in
+            "$1:$2="*) printf '%s' "${pair#*=}"; return 0 ;;
+        esac
+    done
+    printf ''
+}
 # Modes each known plugin can legitimately be in. An unlisted name gets an empty
 # list, meaning it is validated on shape alone — all it takes to keep escapes and
 # control bytes off the line. 'review' is ponytail's one-shot mode, the counterpart
@@ -271,15 +292,19 @@ badge() {
     else
         [ ${#mode} -gt 16 ] && return 0
     fi
-    # Match on the level word, not the whole mode name: caveman also has wenyan-lite
-    # / wenyan-ultra and one-shot modes like commit, which all read as "full".
-    set -- $colors
-    case "$mode" in
-        off)      color=$1 ;;
-        *ultra*)  color=$4 ;;
-        *lite*)   color=$2 ;;
-        *)        color=$3 ;;
-    esac
+    # An exact word first, for a palette whose modes are words rather than levels.
+    # Then the level word, not the whole mode name: caveman also has wenyan-lite /
+    # wenyan-ultra and one-shot modes like commit, which all read as "full".
+    color=$(word_color "$name" "$mode")
+    if [ -z "$color" ]; then
+        set -- $colors
+        case "$mode" in
+            off)      color=$1 ;;
+            *ultra*)  color=$4 ;;
+            *lite*)   color=$2 ;;
+            *)        color=$3 ;;
+        esac
+    fi
     upn=$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')
     upm=$(printf '%s' "$mode" | tr '[:lower:]' '[:upper:]')
     printf '%s[38;5;%sm[%s:%s]%s[0m' "$ESC" "$color" "$upn" "$upm" "$ESC"

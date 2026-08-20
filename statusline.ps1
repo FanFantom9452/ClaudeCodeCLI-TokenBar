@@ -67,6 +67,16 @@ $BOOM  = [char]::ConvertFromUtf32(0x1F4A5)
 # `default` is for any toggle this script has never heard of. Adding one is meant to
 # cost nothing here: drop a flag file in modes/<session_id>/ and it renders. Give it
 # an entry below only when you want it off the neutral ramp and onto its own hue.
+#
+# A palette may also key a colour by the exact mode word. Not every plugin writes a
+# level into its flag: one whose flag carries a state — a pipeline stage, a phase, a
+# warning — has nothing for the four tiers to say, and a state that never changes
+# colour is a badge that stops being read. Any extra key in a palette is matched
+# first and the tiers stay as the fallback, so this costs the two plugins below
+# nothing.
+#
+#   $badgeColors.review = @{ off = 240; lite = 245; full = 250; ultra = 255
+#                            draft = 60; ready = 75; blocked = 196 }
 $badgeColors = @{
     caveman  = @{ off = 240; lite = 137; full = 172; ultra = 208 }   # gray -> tan -> orange -> bright orange
     ponytail = @{ off = 240; lite =  65; full = 108; ultra =  84 }   # gray -> dim sage -> sage -> bright mint
@@ -460,9 +470,11 @@ function ReadMode($path, $valid) {
 }
 
 function BadgeText($name, $mode, $palette) {
-    # Match on the level word, not the whole mode name: caveman also has wenyan-lite
-    # / wenyan-ultra and one-shot modes like commit, which all read as "full".
-    $tier = if ($mode -eq 'off')      { 'off' }
+    # An exact key first, for a palette whose modes are words rather than levels.
+    # Then the level word, not the whole mode name: caveman also has wenyan-lite /
+    # wenyan-ultra and one-shot modes like commit, which all read as "full".
+    $tier = if ($palette.Contains($mode)) { $mode }
+            elseif ($mode -eq 'off')      { 'off' }
             elseif ($mode -like '*ultra*') { 'ultra' }
             elseif ($mode -like '*lite*')  { 'lite' }
             else { 'full' }

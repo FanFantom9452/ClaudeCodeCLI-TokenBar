@@ -62,3 +62,9 @@
 
 # PURPLE_COL=201
 # WARN_GLYPH="⚠"
+
+# ---- plugin badges -------------------------------------------------------
+# Colours keyed by the exact mode word, as name:word=color triples. This is how a
+# plugin whose flag holds a state rather than a level gets a colour that moves;
+# the four-tier ramps stay as the fallback for anything not listed here.
+# WORD_COLORS="review:draft=60 review:ready=75 review:blocked=196"

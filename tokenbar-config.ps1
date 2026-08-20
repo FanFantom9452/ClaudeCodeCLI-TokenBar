@@ -192,3 +192,9 @@
 # $badgeColors.caveman  = @{ off = 240; lite = 137; full = 172; ultra = 208 }
 # $badgeColors.ponytail = @{ off = 240; lite =  65; full = 108; ultra =  84 }
 # $badgeColors.default  = @{ off = 240; lite = 245; full = 250; ultra = 255 }
+#
+# A palette may carry extra keys named for the exact mode word, which is how a
+# plugin whose flag holds a state rather than a level gets a colour that moves.
+# The exact word wins; the four tiers stay as the fallback for anything else.
+# $badgeColors.review = @{ off = 240; lite = 245; full = 250; ultra = 255
+#                          draft = 60; ready = 75; blocked = 196 }
