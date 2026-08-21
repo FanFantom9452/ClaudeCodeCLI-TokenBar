@@ -93,11 +93,16 @@ $BOOM  = [char]::ConvertFromUtf32(0x1F4A5)
 $leadPlugin = ''          # e.g. 'review'; empty means no lead line at all
 $leadStyle  = 'bar'       # 'bar'  -> |NAME WORD ...
                           # 'badge' -> [NAME:WORD] ...
-# 48 because the bar line below is about 98 cells with every field showing, and
-# a lead line of `|NAME WORD`, six dots, this column, a scope and two markers
-# comes to about the same. The title is the only column with anything to gain
+# 60 because everything else on the line is fixed or short: the tag and dots
+# come to 23 cells, a scope and the two markers to about 20, and a terminal is
+# rarely narrower than 110. The title is the only column with anything to gain
 # from the space, and a first draft at 30 cut most real task names in half.
-$leadTitle  = 48          # cells the title column occupies, longer is cut
+#
+# It is a fixed column and not a marquee on purpose. Each render spawns a whole
+# PowerShell, measured at ~575ms on 5.1, so there is no frame rate to animate
+# at — a scrolling title would advance once per render and sit frozen mid-word
+# whenever nothing was happening, which is exactly when it is being read.
+$leadTitle  = 60          # cells the title column occupies, longer is cut
 
 $badgeColors = @{
     caveman  = @{ off = 240; lite = 137; full = 172; ultra = 208 }   # gray -> tan -> orange -> bright orange

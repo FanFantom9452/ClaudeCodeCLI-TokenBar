@@ -210,4 +210,4 @@
 #
 # $leadPlugin = 'review'
 # $leadStyle  = 'bar'     # bar -> |REVIEW DRAFT ... ; badge -> [REVIEW:DRAFT] ...
-# $leadTitle  = 48        # cells the title column occupies; longer titles are cut
+# $leadTitle  = 60        # cells the title column occupies; longer titles are cut
