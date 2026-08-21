@@ -538,8 +538,20 @@ function ReadLead($claudeDir, $sessionId, $name) {
     if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $null }
     if ($item.Length -gt 1024) { return $null }
 
+    # Decoded as UTF-8 explicitly, never by Get-Content. Windows PowerShell 5.1
+    # defaults to the machine's ANSI codepage for a file with no BOM, so a task
+    # named in Chinese arrives as mojibake on exactly the machines most likely to
+    # have one — and the padding is then computed on the wrong characters, so the
+    # whole line lands in the wrong place too. PowerShell 7 defaults to UTF-8 and
+    # shows none of this, which is how it survived a first test.
     $out = @{}
-    $read = Get-Content -LiteralPath $file -TotalCount 12 -ErrorAction SilentlyContinue
+    $text = ''
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($item.FullName)
+        $text = [System.Text.UTF8Encoding]::new($false).GetString($bytes)
+    } catch { return $null }
+    if ($text.Length -gt 0 -and $text[0] -eq [char]0xFEFF) { $text = $text.Substring(1) }
+    $read = @($text -split "`r?`n") | Select-Object -First 12
     foreach ($line in @($read)) {
         $i = $line.IndexOf('=')
         if ($i -lt 1) { continue }
