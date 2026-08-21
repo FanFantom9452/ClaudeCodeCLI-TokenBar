@@ -261,7 +261,11 @@ WORD_COLORS="${WORD_COLORS:-}"
 LEAD_PLUGIN="${LEAD_PLUGIN:-}"      # e.g. review; empty means no lead line
 LEAD_STYLE="${LEAD_STYLE:-bar}"     # bar   ->  |NAME WORD ...
                                     # badge -> [NAME:WORD] ...
-LEAD_TITLE="${LEAD_TITLE:-30}"      # cells the title column occupies
+# 48 because the bar line below is about 98 cells with every field showing,
+# and a lead line of "|NAME WORD", six dots, this column, a scope and two
+# markers comes to about the same. The title is the only column with anything
+# to gain from the space, and a first draft at 30 cut most real names in half.
+LEAD_TITLE="${LEAD_TITLE:-48}"      # cells the title column occupies
 
 word_color() {
     for pair in $WORD_COLORS; do

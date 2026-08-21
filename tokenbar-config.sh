@@ -80,4 +80,4 @@
 #
 # LEAD_PLUGIN=review
 # LEAD_STYLE=bar     # bar -> |REVIEW DRAFT ... ; badge -> [REVIEW:DRAFT] ...
-# LEAD_TITLE=30      # cells the title column occupies; longer titles are cut
+# LEAD_TITLE=48      # cells the title column occupies; longer titles are cut
