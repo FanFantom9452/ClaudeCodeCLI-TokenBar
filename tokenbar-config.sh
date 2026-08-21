@@ -68,3 +68,16 @@
 # plugin whose flag holds a state rather than a level gets a colour that moves;
 # the four-tier ramps stay as the fallback for anything not listed here.
 # WORD_COLORS="review:draft=60 review:ready=75 review:blocked=196"
+
+# ---- the lead line -------------------------------------------------------
+# An optional third line above everything, owned by one plugin. Nothing renders
+# unless LEAD_PLUGIN names one AND that plugin has written
+# modes/<session_id>/<name>.lead, so leaving this empty costs one test.
+#
+# The colour comes from WORD_COLORS above, keyed by the word, so a stage ramp
+# configured once serves both the lead line and the badge. A plugin that owns the
+# lead line does not also get a badge on line 1.
+#
+# LEAD_PLUGIN=review
+# LEAD_STYLE=bar     # bar -> |REVIEW DRAFT ... ; badge -> [REVIEW:DRAFT] ...
+# LEAD_TITLE=30      # cells the title column occupies; longer titles are cut

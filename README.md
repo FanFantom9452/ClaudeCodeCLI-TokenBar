@@ -7,6 +7,8 @@ Two-line Claude Code statusline. Context window and account quota as usage bars.
 ctx ███▊░░░░░░  38%  │  5h ██████▌░░░  66%  ↻ 1h 46m  │  7d █████▊░░░░  58%  ↻ 2d 12h 30m   -6%
 ```
 
+A plugin can claim a third line above these two — see [the lead line](#the-lead-line).
+
 ## Install
 
 **Windows** — one command, works in both CMD and PowerShell:
@@ -242,6 +244,60 @@ Segments: `caveman` `ponytail` `toggles` `model` `dir` `branch` `gitAhead` `gitL
 Every git segment hides itself when there's nothing to say, so a clean tree on an
 up-to-date branch renders as just `main`. Turn `gitLines` off and the old `main*`
 dirty marker comes back instead.
+
+## The lead line
+
+A badge on line 1 has room for one word. A plugin that runs a *process* rather
+than holding a level has more to say than a word — which step it is on, what it
+is working on, who else is in the way — and every turn it says that in the
+conversation instead is output tokens spent on something the statusline shows
+for free.
+
+So one plugin may claim a line above everything:
+
+```
+▌REVIEW DRAFT   ●●●○○  rework the deviation ramp     src/render  ⚿ ask  ⚑2
+[CAVEMAN:FULL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
+ctx ███▊░░░░░░  38%  │  5h ██████▌░░░  66%  ↻ 1h 46m  │  7d █████▊░░░░  58%
+```
+
+Nothing appears unless you name a plugin **and** that plugin has written a lead
+file. Name one in your config:
+
+```powershell
+# ~/.claude/tokenbar-config.ps1
+$leadPlugin = 'review'
+$leadStyle  = 'bar'      # or 'badge' -> [REVIEW:DRAFT] ...
+```
+
+```sh
+# ~/.claude/tokenbar-config.sh
+LEAD_PLUGIN=review
+LEAD_STYLE=bar
+```
+
+The plugin writes `~/.claude/modes/<session_id>/<name>.lead`, one `key=value`
+per line. Every field except `word` is optional, and a field that is absent takes
+no space on the line:
+
+| Key | |
+|---|---|
+| `word` | required. The state, `[a-z0-9-]`, at most 16 characters. Colours the line, via the same palette entry a badge would use. |
+| `step` / `steps` | position in a sequence, drawn as `●●●○○`. Both or neither — a denominator invented here would be a progress bar made of nothing. |
+| `title` | what is being worked on. Padded to `$leadTitle` cells so nothing to its right moves when it changes, cut with `…` when longer. |
+| `where` | which files or directory. |
+| `guard` | one lowercase word, rendered `⚿ ask`. |
+| `others` | a count, rendered `⚑2`. Omit it rather than writing `0`. |
+
+The file is read with the same suspicion as a flag file: reparse points refused,
+over 1KB refused, at most twelve lines, and every C0/C1 control byte stripped
+from every value. A lead file cannot repaint your terminal.
+
+Widths are counted in **terminal cells**, not characters, so a CJK title lines up
+with an ASCII one. Deleting the file takes the line away; the statusline goes back
+to two lines with no gap left behind. **The plugin that owns the lead line does not
+also get a badge on line 1** — the same word twice on one screen reads as two
+things.
 
 ## Auto-update
 

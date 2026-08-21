@@ -245,6 +245,24 @@ colors_for() {
 #   WORD_COLORS="review:draft=60 review:ready=75 review:blocked=196"
 WORD_COLORS="${WORD_COLORS:-}"
 
+# ---- the lead line --------------------------------------------------------
+#
+# An optional line above everything else, owned by one plugin. A badge on line 1
+# has room for a word; a plugin running a process rather than holding a level has
+# more to say than a word, and saying it in the transcript costs output tokens
+# every turn while the statusline says it for free.
+#
+# Nothing renders unless LEAD_PLUGIN names a plugin AND that plugin has written
+# modes/<session_id>/<name>.lead, so an install that does not use it pays one
+# test for a file that is not there.
+#
+# The colour comes from that plugin's own palette, keyed by the word, which is
+# the lookup a badge already does.
+LEAD_PLUGIN="${LEAD_PLUGIN:-}"      # e.g. review; empty means no lead line
+LEAD_STYLE="${LEAD_STYLE:-bar}"     # bar   ->  |NAME WORD ...
+                                    # badge -> [NAME:WORD] ...
+LEAD_TITLE="${LEAD_TITLE:-30}"      # cells the title column occupies
+
 word_color() {
     for pair in $WORD_COLORS; do
         case "$pair" in
@@ -310,6 +328,136 @@ badge() {
     printf '%s[38;5;%sm[%s:%s]%s[0m' "$ESC" "$color" "$upn" "$upm" "$ESC"
 }
 
+# Terminal cells, not characters. A CJK title is one character per two cells, so
+# padding on a character count puts every row in a different place and the column
+# stops being one.
+#
+# LC_ALL=C forces byte semantics in both gawk and mawk, so the UTF-8 lead bytes
+# can be walked by hand. mawk has no multibyte support at all, and anything that
+# relied on it would work on one machine and misalign on the next.
+cells() {
+    LC_ALL=C awk '
+    BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c", i)] = i }
+    {
+        n = 0; i = 1; L = length($0)
+        while (i <= L) {
+            b = ord[substr($0, i, 1)]
+            if (b < 0x80)       { n += 1; i += 1 }
+            else if (b < 0xE0)  { n += 1; i += 2 }
+            else if (b < 0xF0)  { n += 2; i += 3 }
+            else                { n += 2; i += 4 }
+        }
+        print n
+    }' <<EOF
+$1
+EOF
+}
+
+# Cut to a cell budget and pad to it. Cutting on characters overshoots a CJK
+# string by its own length again, which is how a fixed column ends up ragged.
+fitpad() {
+    LC_ALL=C awk -v want="$2" -v pad="${3:-1}" '
+    BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c", i)] = i }
+    {
+        n = 0; i = 1; L = length($0); out = ""
+        while (i <= L) {
+            b = ord[substr($0, i, 1)]
+            if (b < 0x80)       { w = 1; k = 1 }
+            else if (b < 0xE0)  { w = 1; k = 2 }
+            else if (b < 0xF0)  { w = 2; k = 3 }
+            else                { w = 2; k = 4 }
+            if (n + w > want - 1 && L > i + k - 1) { out = out "\xe2\x80\xa6"; n += 1; break }
+            if (n + w > want) break
+            out = out substr($0, i, k); n += w; i += k
+        }
+        if (pad == 1) while (n < want) { out = out " "; n++ }
+        print out
+    }' <<EOF
+$1
+EOF
+}
+
+# One key=value per line, every control byte stripped. An ESC surviving from here
+# would let the file repaint the whole statusline, and it is written by a plugin
+# rather than by this script.
+lead_field() {
+    sed -n "s/^$2=//p" "$1" 2>/dev/null | head -n1 | tr -d '\000-\037\177'
+}
+
+lead=""
+build_lead() {
+    f="$1"; name="$2"
+    [ -f "$f" ] || return 0
+    [ -L "$f" ] && return 0
+    size=$(wc -c < "$f" 2>/dev/null | tr -d ' ') || return 0
+    [ "$size" -gt 1024 ] && return 0
+
+    word=$(lead_field "$f" word | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
+    [ -n "$word" ] || return 0
+    [ ${#word} -gt 16 ] && return 0
+
+    color=$(word_color "$name" "$word")
+    if [ -z "$color" ]; then
+        set -- $(colors_for "$name")
+        color=$3
+    fi
+
+    upn=$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')
+    upw=$(printf '%s' "$word"  | tr '[:lower:]' '[:upper:]')
+
+    # The stage column is held by padding after the marker, never inside it:
+    # "[NAME:BUILD ]" reads as a typo rather than as alignment.
+    if [ "$LEAD_STYLE" = "badge" ]; then
+        tag="[$upn:$upw]"
+        want=$(( ${#upn} + 9 ))
+        wpad=""; wlen=${#tag}
+        while [ "$wlen" -lt "$want" ]; do wpad="$wpad "; wlen=$((wlen + 1)); done
+        head="$ESC[38;5;${color}m$tag$ESC[0m$wpad"
+    else
+        wpad=""; wlen=${#upw}
+        while [ "$wlen" -lt 6 ]; do wpad="$wpad "; wlen=$((wlen + 1)); done
+        head="$ESC[38;5;${color}m▌$upn $upw$ESC[0m$wpad"
+    fi
+    lead="$head"
+
+    # Filled to the current step, hollow after it, and only when the plugin said
+    # how many there are. Inventing a denominator would draw progress out of
+    # nothing.
+    step=$(lead_field "$f" step  | tr -cd '0-9')
+    steps=$(lead_field "$f" steps | tr -cd '0-9')
+    if [ -n "$step" ] && [ -n "$steps" ] && [ "$steps" -ge 1 ] && [ "$steps" -le 12 ] &&
+       [ "$step" -ge 1 ] && [ "$step" -le "$steps" ]; then
+        dots=""; k=1
+        while [ "$k" -le "$steps" ]; do
+            if [ "$k" -le "$step" ]; then dots="$dots$ESC[38;5;${color}m●$ESC[0m"
+            else dots="$dots$ESC[38;5;240m○$ESC[0m"; fi
+            k=$((k + 1))
+        done
+        lead="$lead  $dots"
+    fi
+
+    # The tail is decided before the title, because the title is padded to a
+    # column only when something follows it. Padding it otherwise ends the line
+    # in invisible whitespace that wraps badly at a narrow width.
+    tail=""
+    where=$(lead_field "$f" where)
+    guard=$(lead_field "$f" guard | tr -cd 'a-z')
+    others=$(lead_field "$f" others | tr -cd '0-9')
+    [ -n "$where" ]  && tail="$tail  $ESC[38;5;245m$(fitpad "$where" 40 0)$ESC[0m"
+    [ -n "$guard" ]  && tail="$tail  $ESC[38;5;179m⚿ $guard$ESC[0m"
+    if [ -n "$others" ] && [ "$others" -ge 1 ] 2>/dev/null; then
+        tail="$tail  $ESC[38;5;203m⚑$others$ESC[0m"
+    fi
+
+    title=$(lead_field "$f" title)
+    if [ -n "$title" ]; then
+        if [ -n "$tail" ]; then title=$(fitpad "$title" "$LEAD_TITLE" 1)
+        else title=$(fitpad "$title" "$LEAD_TITLE" 0); fi
+        lead="$lead  $ESC[38;5;250m$title$ESC[0m"
+    fi
+    lead="$lead$tail"
+}
+
 badges=""
 add_badge() {
     b=$(badge "$1" "$2")
@@ -332,11 +480,22 @@ if [ -n "$sid" ] && [ ${#sid} -le 64 ] &&
     [ -d "$CFG/modes/$sid" ] && modedir="$CFG/modes/$sid"
 fi
 
+# Before the badges, because whether the lead line renders decides whether its
+# owner still gets one. A plugin saying the same word twice on one screen is read
+# as two things.
+if [ -n "$LEAD_PLUGIN" ] && [ -n "$modedir" ]; then
+    case "$LEAD_PLUGIN" in
+        [!a-z0-9]*|*[!a-z0-9-]*) ;;
+        *) build_lead "$modedir/$LEAD_PLUGIN.lead" "$LEAD_PLUGIN" ;;
+    esac
+fi
+
 # Fixed order — caveman, ponytail, then everything else alphabetically (the glob
 # sorts) — so the line never reshuffles between renders just because a flag file
 # was touched.
 for n in caveman ponytail; do
     gate_for "$n" || continue
+    [ -n "$lead" ] && [ "$n" = "$LEAD_PLUGIN" ] && continue
     if [ -n "$modedir" ] && [ -f "$modedir/$n" ]; then
         add_badge "$modedir/$n" "$n"
     else
@@ -349,15 +508,17 @@ if [ -n "$modedir" ] && [ "$SHOW_TOGGLES" = "1" ]; then
         n=${f##*/}
         case "$n" in
             caveman|ponytail) continue ;;
+            *.lead)           continue ;;
             [!a-z0-9]*)       continue ;;
             *[!a-z0-9-]*)     continue ;;
         esac
+        [ -n "$lead" ] && [ "$n" = "$LEAD_PLUGIN" ] && continue
         add_badge "$f" "$n"
     done
 fi
 
 printf '%s' "$fields" | awk -F'\t' \
-    -v esc="$ESC" -v badges="$badges" -v branch="$branch" \
+    -v esc="$ESC" -v badges="$badges" -v branch="$branch" -v lead="$lead" \
     -v barw="$BAR_WIDTH" -v gap="$FIELD_GAP" -v seggap="$SEG_GAP" -v segsep="$SEG_SEP" \
     -v s_model="$SHOW_MODEL" -v s_dir="$SHOW_DIR" -v s_ctx="$SHOW_CONTEXT" \
     -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_delta="$SHOW_DELTA"     -v ctxtiers="$CTX_TIERS"     -v ctxmarks="$CTX_MARKS" -v ctxmarkmin="$CTX_MARK_MINWINDOW"     -v ramp5h="$RAMP_5H" -v ramp5hmark="$RAMP_5H_MARK"     -v devramp="$DEV_RAMP" -v dev7dpurple="$DEV_7D_PURPLE"     -v devmarks="$DEV_MARKS" -v dev7dunknown="$DEV_7D_UNKNOWN" -v hardstop7d="$HARD_STOP_7D"     -v purplecol="$PURPLE_COL" -v warnglyph="$WARN_GLYPH" '
@@ -574,8 +735,12 @@ function fmtspan(sec, units,   d, h, m, tot) {
     }
 
     out = ""
+    # Above everything, and only when a plugin was named and has written one. No
+    # lead file means two lines exactly as before: the line appears with the task
+    # and goes with it, rather than sitting there empty saying nothing.
+    if (lead != "") out = lead "\n"
     for (i = 1; i <= n1; i++) out = out (i > 1 ? dim(" | ") : "") l1[i]
-    if (n1 > 0 && n2 > 0) out = out "\n"
+    if ((n1 > 0 || lead != "") && n2 > 0) out = out "\n"
     for (i = 1; i <= n2; i++) out = out (i > 1 ? dim(seggap segsep seggap) : "") l2[i]
     printf "%s", out
 }'

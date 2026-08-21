@@ -77,6 +77,24 @@ $BOOM  = [char]::ConvertFromUtf32(0x1F4A5)
 #
 #   $badgeColors.review = @{ off = 240; lite = 245; full = 250; ultra = 255
 #                            draft = 60; ready = 75; blocked = 196 }
+# ---- the lead line ------------------------------------------------------
+#
+# An optional line above everything else, owned by one plugin. A badge on line 1
+# has room for a word; a plugin running a process rather than holding a level has
+# more to say than a word, and saying it in the transcript means saying it again
+# every turn while the statusline says it for free.
+#
+# Nothing renders unless $leadPlugin names a plugin AND that plugin has written
+# modes/<session_id>/<name>.lead. So this costs an install that does not use it
+# exactly one Test-Path.
+#
+# The colour comes from that plugin's own palette, keyed by `word` — the same
+# lookup a badge does, so a stage ramp configured once serves both.
+$leadPlugin = ''          # e.g. 'review'; empty means no lead line at all
+$leadStyle  = 'bar'       # 'bar'  -> |NAME WORD ...
+                          # 'badge' -> [NAME:WORD] ...
+$leadTitle  = 30          # cells the title column occupies, longer is cut
+
 $badgeColors = @{
     caveman  = @{ off = 240; lite = 137; full = 172; ultra = 208 }   # gray -> tan -> orange -> bright orange
     ponytail = @{ off = 240; lite =  65; full = 108; ultra =  84 }   # gray -> dim sage -> sage -> bright mint
@@ -469,6 +487,123 @@ function ReadMode($path, $valid) {
     return $mode
 }
 
+# Terminal cells, not characters. A CJK title is one character per two cells, so
+# padding on .Length puts every row in a different place and the column stops
+# being a column — which is the whole reason the title has a fixed width.
+function Cells([string]$s) {
+    $n = 0
+    foreach ($ch in $s.ToCharArray()) {
+        $c = [int]$ch
+        if (($c -ge 0x1100 -and $c -le 0x115F) -or ($c -ge 0x2E80 -and $c -le 0x303E) -or
+            ($c -ge 0x3041 -and $c -le 0x33FF) -or ($c -ge 0x3400 -and $c -le 0x4DBF) -or
+            ($c -ge 0x4E00 -and $c -le 0x9FFF) -or ($c -ge 0xAC00 -and $c -le 0xD7A3) -or
+            ($c -ge 0xF900 -and $c -le 0xFAFF) -or ($c -ge 0xFE30 -and $c -le 0xFE6F) -or
+            ($c -ge 0xFF00 -and $c -le 0xFF60) -or ($c -ge 0xFFE0 -and $c -le 0xFFE6)) { $n += 2 }
+        else { $n += 1 }
+    }
+    return $n
+}
+
+# Cut to a cell budget and mark it. Cutting on characters overshoots a CJK string
+# by its own length again, which is how a fixed column ends up ragged.
+function FitCells([string]$s, [int]$cells) {
+    if ((Cells $s) -le $cells) { return $s }
+    $out = ''; $n = 0
+    foreach ($ch in $s.ToCharArray()) {
+        $w = Cells ([string]$ch)
+        if ($n + $w -gt $cells - 1) { break }
+        $out += $ch; $n += $w
+    }
+    return $out + [char]0x2026
+}
+
+function PadCells([string]$s, [int]$cells) {
+    $s = FitCells $s $cells
+    return $s + (' ' * [Math]::Max(0, $cells - (Cells $s)))
+}
+
+# The lead file, read with the same suspicion as a flag file and then some, since
+# unlike a flag it carries free text that lands on the line.
+#
+# Refuses a reparse point and anything over 1KB, takes at most the first twelve
+# lines, and strips every C0 and C1 byte from every value — an ESC reaching the
+# terminal from here would let a file rewrite the whole statusline.
+function ReadLead($claudeDir, $sessionId, $name) {
+    if ($sessionId -notmatch '^[0-9a-fA-F][0-9a-fA-F-]{7,63}$') { return $null }
+    if ($name -notmatch '^[a-z0-9][a-z0-9-]{0,31}$') { return $null }
+    $file = Join-Path (Join-Path (Join-Path $claudeDir 'modes') $sessionId) "$name.lead"
+    if (-not (Test-Path -LiteralPath $file)) { return $null }
+    $item = Get-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+    if (-not $item -or $item.PSIsContainer) { return $null }
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $null }
+    if ($item.Length -gt 1024) { return $null }
+
+    $out = @{}
+    $read = Get-Content -LiteralPath $file -TotalCount 12 -ErrorAction SilentlyContinue
+    foreach ($line in @($read)) {
+        $i = $line.IndexOf('=')
+        if ($i -lt 1) { continue }
+        $k = $line.Substring(0, $i).Trim().ToLowerInvariant()
+        if ($k -notmatch '^[a-z]{1,12}$') { continue }
+        $v = $line.Substring($i + 1) -replace '[\p{Cc}\p{Cf}]', ''
+        $out[$k] = $v.Trim()
+    }
+    if (-not $out.Contains('word')) { return $null }
+    $out.word = ($out.word.ToLowerInvariant() -replace '[^a-z0-9-]', '')
+    if (-not $out.word -or $out.word.Length -gt 16) { return $null }
+    return $out
+}
+
+# Filled to the current step, hollow after it. Only when the plugin said how many
+# there are — inventing a denominator would draw a progress bar out of nothing.
+function StepDots($step, $steps, $colour) {
+    $n = 0; $of = 0
+    [void][int]::TryParse([string]$step, [ref]$n)
+    [void][int]::TryParse([string]$steps, [ref]$of)
+    if ($of -lt 1 -or $of -gt 12 -or $n -lt 1 -or $n -gt $of) { return '' }
+    $s = ''
+    for ($k = 1; $k -le $of; $k++) {
+        $s += if ($k -le $n) { C $colour ([char]0x25CF) } else { C 240 ([char]0x25CB) }
+    }
+    return $s
+}
+
+function LeadLine($name, $lead, $palette, $style, $titleCells) {
+    $word = $lead.word
+    $colour = if ($palette.Contains($word)) { $palette[$word] } else { $palette['full'] }
+    $upper = $word.ToUpperInvariant()
+    $upName = $name.ToUpperInvariant()
+
+    # The stage column is held by padding after the marker, never inside it —
+    # "[NAME:BUILD ]" reads as a typo rather than as alignment.
+    if ($style -eq 'badge') {
+        $tag = "[${upName}:${upper}]"
+        $head = (C $colour $tag) + (' ' * [Math]::Max(0, ($upName.Length + 9) - $tag.Length))
+    } else {
+        $head = (C $colour ([char]0x258C)) + (C $colour $upName) + ' ' + (C $colour $upper) +
+                (' ' * [Math]::Max(0, 6 - $upper.Length))
+    }
+
+    # The tail is built first so the title knows whether anything follows it.
+    # Padding it to a column is what stops the fields to its right moving when the
+    # task is renamed; padding it when nothing is to its right just ends the line
+    # in invisible whitespace, which wraps at a narrow width and selects badly.
+    $tail = @()
+    if ($lead['where']) { $tail += C 245 (FitCells $lead['where'] 40) }
+    if ($lead['guard'] -match '^[a-z]{1,8}$') { $tail += C 179 (([char]0x26BF) + ' ' + $lead['guard']) }
+    if ($lead['others'] -match '^[1-9][0-9]{0,2}$') { $tail += C 203 (([char]0x2691) + $lead['others']) }
+
+    $seg = @($head)
+    $dots = StepDots $lead['step'] $lead['steps'] $colour
+    if ($dots) { $seg += $dots }
+    if ($lead['title']) {
+        $t = if ($tail.Count) { PadCells $lead['title'] $titleCells } else { FitCells $lead['title'] $titleCells }
+        $seg += C 250 $t
+    }
+    $seg += $tail
+    return ($seg -join '  ')
+}
+
 function BadgeText($name, $mode, $palette) {
     # An exact key first, for a palette whose modes are words rather than levels.
     # Then the level word, not the whole mode name: caveman also has wenyan-lite /
@@ -527,10 +662,19 @@ $l1 = @()
 
 # Fixed order — caveman, ponytail, then everything else alphabetically — so the line
 # never reshuffles between renders just because a flag file was touched.
+# Read before the badges, because whether the lead line renders decides whether
+# its owner still gets one.
+$leadData = if ($leadPlugin -and $j.session_id) { ReadLead $ClaudeDir ([string]$j.session_id) $leadPlugin } else { $null }
+$leadShown = [bool]$leadData
+
 $modes = CollectModes ([string]$j.session_id)
 $order = @('caveman', 'ponytail') + @($modes.Keys | Where-Object { $_ -ne 'caveman' -and $_ -ne 'ponytail' } | Sort-Object)
 foreach ($n in $order) {
     if (-not $modes.Contains($n)) { continue }
+    # The plugin that owns the lead line does not also get a badge here. It is
+    # already saying the same word one line up, in the same colour, and a thing
+    # said twice on one screen is read as two things.
+    if ($leadPlugin -and $n -eq $leadPlugin -and $leadShown) { continue }
     $gate = if ($n -eq 'caveman') { $show.caveman } elseif ($n -eq 'ponytail') { $show.ponytail } else { $show.toggles }
     if (-not $gate) { continue }
     $pal = if ($badgeColors.Contains($n)) { $badgeColors[$n] } else { $badgeColors.default }
@@ -693,6 +837,15 @@ if ($show.quota7d) {
 }
 
 $lines = @()
+
+# Above everything, and only when a plugin was named and has written one. An
+# absent lead file means two lines exactly as before — the line appears with the
+# task and goes with it, rather than sitting there empty saying nothing.
+if ($leadShown) {
+    $pal = if ($badgeColors.Contains($leadPlugin)) { $badgeColors[$leadPlugin] } else { $badgeColors.default }
+    $lines += (LeadLine $leadPlugin $leadData $pal $leadStyle $leadTitle)
+}
+
 if ($l1.Count) { $lines += ($l1 -join (C $DIM ' | ')) }
 if ($l2.Count) { $lines += ($l2 -join (C $DIM "$segGap$segSep$segGap")) }
 [Console]::Write($lines -join "`n")

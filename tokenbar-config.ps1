@@ -198,3 +198,16 @@
 # The exact word wins; the four tiers stay as the fallback for anything else.
 # $badgeColors.review = @{ off = 240; lite = 245; full = 250; ultra = 255
 #                          draft = 60; ready = 75; blocked = 196 }
+
+# ---- the lead line -------------------------------------------------------
+# An optional third line above everything, owned by one plugin. Nothing renders
+# unless $leadPlugin names one AND that plugin has written
+# modes/<session_id>/<name>.lead, so leaving this empty costs one Test-Path.
+#
+# The colour comes from that plugin's own palette below, keyed by the word, so a
+# stage ramp configured once serves both the lead line and the badge. A plugin
+# that owns the lead line does not also get a badge on line 1.
+#
+# $leadPlugin = 'review'
+# $leadStyle  = 'bar'     # bar -> |REVIEW DRAFT ... ; badge -> [REVIEW:DRAFT] ...
+# $leadTitle  = 30        # cells the title column occupies; longer titles are cut
