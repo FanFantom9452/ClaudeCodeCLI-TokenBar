@@ -389,6 +389,7 @@ lead_field() {
 }
 
 lead=""
+leadrail=""
 build_lead() {
     f="$1"; name="$2"
     [ -f "$f" ] || return 0
@@ -406,6 +407,20 @@ build_lead() {
         color=$3
     fi
 
+    # Read before the head, because it decides the rail's colour.
+    others=$(lead_field "$f" others | tr -cd '0-9')
+
+    # `others` is the plugin saying somebody else is in its files right now. When
+    # a palette offers a `clash` colour that takes the rail -- on all three rows,
+    # so the block flips as one object instead of the top row disagreeing with the
+    # two under it. The word itself keeps the stage colour: the rail is the alarm,
+    # and the word is still the answer to "how far along is this".
+    leadrail="$color"
+    if [ -n "$others" ] && [ "$others" -ge 1 ] 2>/dev/null; then
+        clashcolor=$(word_color "$name" clash)
+        [ -n "$clashcolor" ] && leadrail="$clashcolor"
+    fi
+
     upn=$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')
     upw=$(printf '%s' "$word"  | tr '[:lower:]' '[:upper:]')
 
@@ -417,10 +432,11 @@ build_lead() {
         wpad=""; wlen=${#tag}
         while [ "$wlen" -lt "$want" ]; do wpad="$wpad "; wlen=$((wlen + 1)); done
         head="$ESC[38;5;${color}m$tag$ESC[0m$wpad"
+        leadrail=""   # badge style opens with a tag, so there is no rail to continue
     else
         wpad=""; wlen=${#upw}
         while [ "$wlen" -lt 6 ]; do wpad="$wpad "; wlen=$((wlen + 1)); done
-        head="$ESC[38;5;${color}m▌$upn $upw$ESC[0m$wpad"
+        head="$ESC[38;5;${leadrail}m▌$ESC[0m$ESC[38;5;${color}m$upn $upw$ESC[0m$wpad"
     fi
     lead="$head"
 
@@ -440,26 +456,29 @@ build_lead() {
         lead="$lead  $dots"
     fi
 
-    # The tail is decided before the title, because the title is padded to a
-    # column only when something follows it. Padding it otherwise ends the line
-    # in invisible whitespace that wraps badly at a narrow width.
-    tail=""
+    # Field order is by volatility, and the title goes last.
+    #
+    # It used to sit in the middle, padded to a fixed column so that renaming the
+    # task did not shift the fields to its right. That column cost a short task a
+    # hole of empty cells, and it left the one field a reader must find fast --
+    # the ⚑ -- with no fixed address of its own, since where it landed depended on
+    # how long `where` happened to be.
+    #
+    # Last, the title needs no padding at all: nothing follows it, so nothing can
+    # be pushed. It is still capped, because a long task name is the plugin's free
+    # text and an uncapped one would wrap the line.
     where=$(lead_field "$f" where)
     guard=$(lead_field "$f" guard | tr -cd 'a-z')
-    others=$(lead_field "$f" others | tr -cd '0-9')
-    [ -n "$where" ]  && tail="$tail  $ESC[38;5;245m$(fitpad "$where" 40 0)$ESC[0m"
-    [ -n "$guard" ]  && tail="$tail  $ESC[38;5;179m⚿ $guard$ESC[0m"
+    [ -n "$guard" ]  && lead="$lead  $ESC[38;5;179m⚿ $guard$ESC[0m"
     if [ -n "$others" ] && [ "$others" -ge 1 ] 2>/dev/null; then
-        tail="$tail  $ESC[38;5;203m⚑$others$ESC[0m"
+        lead="$lead  $ESC[38;5;203m⚑$others$ESC[0m"
     fi
+    [ -n "$where" ]  && lead="$lead  $ESC[38;5;245m$(fitpad "$where" 40 0)$ESC[0m"
 
     title=$(lead_field "$f" title)
     if [ -n "$title" ]; then
-        if [ -n "$tail" ]; then title=$(fitpad "$title" "$LEAD_TITLE" 1)
-        else title=$(fitpad "$title" "$LEAD_TITLE" 0); fi
-        lead="$lead  $ESC[38;5;250m$title$ESC[0m"
+        lead="$lead  $ESC[38;5;250m$(fitpad "$title" "$LEAD_TITLE" 0)$ESC[0m"
     fi
-    lead="$lead$tail"
 }
 
 badges=""
@@ -522,7 +541,7 @@ if [ -n "$modedir" ] && [ "$SHOW_TOGGLES" = "1" ]; then
 fi
 
 printf '%s' "$fields" | awk -F'\t' \
-    -v esc="$ESC" -v badges="$badges" -v branch="$branch" -v lead="$lead" \
+    -v esc="$ESC" -v badges="$badges" -v branch="$branch" -v lead="$lead" -v leadrail="$leadrail" \
     -v barw="$BAR_WIDTH" -v gap="$FIELD_GAP" -v seggap="$SEG_GAP" -v segsep="$SEG_SEP" \
     -v s_model="$SHOW_MODEL" -v s_dir="$SHOW_DIR" -v s_ctx="$SHOW_CONTEXT" \
     -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_delta="$SHOW_DELTA"     -v ctxtiers="$CTX_TIERS"     -v ctxmarks="$CTX_MARKS" -v ctxmarkmin="$CTX_MARK_MINWINDOW"     -v ramp5h="$RAMP_5H" -v ramp5hmark="$RAMP_5H_MARK"     -v devramp="$DEV_RAMP" -v dev7dpurple="$DEV_7D_PURPLE"     -v devmarks="$DEV_MARKS" -v dev7dunknown="$DEV_7D_UNKNOWN" -v hardstop7d="$HARD_STOP_7D"     -v purplecol="$PURPLE_COL" -v warnglyph="$WARN_GLYPH" '
@@ -742,9 +761,21 @@ function fmtspan(sec, units,   d, h, m, tot) {
     # Above everything, and only when a plugin was named and has written one. No
     # lead file means two lines exactly as before: the line appears with the task
     # and goes with it, rather than sitting there empty saying nothing.
+    #
+    # The rail carries down the other two rows so the three read as one block
+    # rather than as a plugin line with the old statusline underneath it. Two
+    # cells, which is all the bar line can spare: it already runs past a hundred
+    #
+    # No apostrophes below this point: the whole awk program is one single-quoted
+    # shell string, and one of them ends it early.
+    # on a machine with quota timers, and a wider gutter there is a wrap, not a
+    # decoration. Empty in badge style, where the lead has no rail to continue.
+    railpfx = (leadrail != "") ? tint(leadrail, "▌") " " : ""
     if (lead != "") out = lead "\n"
+    if (n1 > 0) out = out railpfx
     for (i = 1; i <= n1; i++) out = out (i > 1 ? dim(" | ") : "") l1[i]
     if ((n1 > 0 || lead != "") && n2 > 0) out = out "\n"
+    if (n2 > 0) out = out railpfx
     for (i = 1; i <= n2; i++) out = out (i > 1 ? dim(seggap segsep seggap) : "") l2[i]
     printf "%s", out
 }'

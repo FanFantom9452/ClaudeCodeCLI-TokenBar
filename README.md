@@ -256,10 +256,21 @@ for free.
 So one plugin may claim a line above everything:
 
 ```
-▌REVIEW DRAFT   ●●●○○  rework the deviation ramp     src/render  ⚿ ask  ⚑2
-[CAVEMAN:FULL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
-ctx ███▊░░░░░░  38%  │  5h ██████▌░░░  66%  ↻ 1h 46m  │  7d █████▊░░░░  58%
+▌REVIEW DRAFT   ●●●○○  ⚿ ask  ⚑2  src/render  rework the deviation ramp
+▌ [CAVEMAN:FULL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
+▌ ctx ███▊░░░░░░  38%  │  5h ██████▌░░░  66%  ↻ 1h 46m  │  7d █████▊░░░░  58%
 ```
+
+The rail carries down the other two rows, so the three read as one block rather
+than as a plugin line with the old statusline underneath it. It costs those rows
+two cells, which is all the bar line can spare — with quota timers on it it
+already runs past a hundred, and a wider gutter there is a wrap, not a decoration.
+In `badge` style the lead line opens with `[REVIEW:DRAFT]` and there is no rail to
+continue, so the rows below it are left alone.
+
+When the palette names a `clash` colour and the plugin writes `others`, that
+colour takes **the rail on all three rows** while the word keeps its own. The
+alarm is the rail; the word is still the answer to *how far along is this*.
 
 Nothing appears unless you name a plugin **and** that plugin has written a lead
 file. Name one in your config:
@@ -284,10 +295,17 @@ no space on the line:
 |---|---|
 | `word` | required. The state, `[a-z0-9-]`, at most 16 characters. Colours the line, via the same palette entry a badge would use. |
 | `step` / `steps` | position in a sequence, drawn as `●●●○○`. Both or neither — a denominator invented here would be a progress bar made of nothing. |
-| `title` | what is being worked on. Padded to `$leadTitle` cells so nothing to its right moves when it changes, cut with `…` when longer. |
-| `where` | which files or directory. |
 | `guard` | one lowercase word, rendered `⚿ ask`. |
-| `others` | a count, rendered `⚑2`. Omit it rather than writing `0`. |
+| `others` | a count, rendered `⚑2`. Omit it rather than writing `0`. Also turns the rail the palette's `clash` colour, if it has one. |
+| `where` | which files or directory. Cut at 40 cells. |
+| `title` | what is being worked on. Last on the line and cut at `$leadTitle` cells. |
+
+The order is by how often a field changes, and the title is last on purpose. It
+used to sit in the middle, padded to a fixed column so renaming the task did not
+shift what followed it — but that column cost a short task a hole of empty cells,
+and it left `⚑`, the one field you need to find fast, with no fixed address: where
+it landed depended on how long `where` happened to be. Last, the title needs no
+padding, because nothing follows it that could be pushed.
 
 The file is read with the same suspicion as a flag file: reparse points refused,
 over 1KB refused, at most twelve lines, and every C0/C1 control byte stripped

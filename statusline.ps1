@@ -589,9 +589,26 @@ function StepDots($step, $steps, $colour) {
     return $s
 }
 
+# The rail's colour, shared by the lead line and by the two lines beneath it.
+#
+# `others` is the plugin saying somebody else is in its files right now. When a
+# palette offers a `clash` colour that takes the rail — on all three rows, so the
+# block flips as one object instead of the top row disagreeing with the two under
+# it. The word itself keeps the stage colour: the rail is the alarm, and the word
+# is still the answer to "how far along is this".
+function LeadRail($lead, $palette) {
+    if ($lead['others'] -match '^[1-9][0-9]{0,2}$' -and $palette.Contains('clash')) {
+        return $palette['clash']
+    }
+    $word = $lead.word
+    if ($palette.Contains($word)) { return $palette[$word] }
+    return $palette['full']
+}
+
 function LeadLine($name, $lead, $palette, $style, $titleCells) {
     $word = $lead.word
     $colour = if ($palette.Contains($word)) { $palette[$word] } else { $palette['full'] }
+    $rail = LeadRail $lead $palette
     $upper = $word.ToUpperInvariant()
     $upName = $name.ToUpperInvariant()
 
@@ -601,27 +618,28 @@ function LeadLine($name, $lead, $palette, $style, $titleCells) {
         $tag = "[${upName}:${upper}]"
         $head = (C $colour $tag) + (' ' * [Math]::Max(0, ($upName.Length + 9) - $tag.Length))
     } else {
-        $head = (C $colour ([char]0x258C)) + (C $colour $upName) + ' ' + (C $colour $upper) +
+        $head = (C $rail ([char]0x258C)) + (C $colour $upName) + ' ' + (C $colour $upper) +
                 (' ' * [Math]::Max(0, 6 - $upper.Length))
     }
 
-    # The tail is built first so the title knows whether anything follows it.
-    # Padding it to a column is what stops the fields to its right moving when the
-    # task is renamed; padding it when nothing is to its right just ends the line
-    # in invisible whitespace, which wraps at a narrow width and selects badly.
-    $tail = @()
-    if ($lead['where']) { $tail += C 245 (FitCells $lead['where'] 40) }
-    if ($lead['guard'] -match '^[a-z]{1,8}$') { $tail += C 179 (([char]0x26BF) + ' ' + $lead['guard']) }
-    if ($lead['others'] -match '^[1-9][0-9]{0,2}$') { $tail += C 203 (([char]0x2691) + $lead['others']) }
-
+    # Field order is by volatility, and the title goes last.
+    #
+    # It used to sit in the middle, padded to a fixed column so that renaming the
+    # task did not shift the fields to its right. That column cost a short task a
+    # hole of empty cells, and it left the one field a reader must find fast — the
+    # ⚑ — with no fixed address of its own, since where it landed depended on how
+    # long `where` happened to be.
+    #
+    # Last, the title needs no padding at all: nothing follows it, so nothing can
+    # be pushed. It is still capped, because a long task name is the plugin's free
+    # text and an uncapped one would wrap the line.
     $seg = @($head)
     $dots = StepDots $lead['step'] $lead['steps'] $colour
     if ($dots) { $seg += $dots }
-    if ($lead['title']) {
-        $t = if ($tail.Count) { PadCells $lead['title'] $titleCells } else { FitCells $lead['title'] $titleCells }
-        $seg += C 250 $t
-    }
-    $seg += $tail
+    if ($lead['guard'] -match '^[a-z]{1,8}$') { $seg += C 179 (([char]0x26BF) + ' ' + $lead['guard']) }
+    if ($lead['others'] -match '^[1-9][0-9]{0,2}$') { $seg += C 203 (([char]0x2691) + $lead['others']) }
+    if ($lead['where']) { $seg += C 245 (FitCells $lead['where'] 40) }
+    if ($lead['title']) { $seg += C 250 (FitCells $lead['title'] $titleCells) }
     return ($seg -join '  ')
 }
 
@@ -862,11 +880,22 @@ $lines = @()
 # Above everything, and only when a plugin was named and has written one. An
 # absent lead file means two lines exactly as before — the line appears with the
 # task and goes with it, rather than sitting there empty saying nothing.
+#
+# The rail carries down the other two rows so the three read as one block rather
+# than as a plugin's line with the old statusline underneath it. Two cells, which
+# is all the bar line can spare: it already runs past a hundred on a machine with
+# quota timers, and a wider gutter there is a wrap, not a decoration.
+#
+# Bar style only. In badge style the lead line opens with `[NAME:WORD]` and has no
+# rail to continue, so prefixing the rows below it would start a stripe that has
+# no top.
+$railPrefix = ''
 if ($leadShown) {
     $pal = if ($badgeColors.Contains($leadPlugin)) { $badgeColors[$leadPlugin] } else { $badgeColors.default }
     $lines += (LeadLine $leadPlugin $leadData $pal $leadStyle $leadTitle)
+    if ($leadStyle -ne 'badge') { $railPrefix = (C (LeadRail $leadData $pal) ([char]0x258C)) + ' ' }
 }
 
-if ($l1.Count) { $lines += ($l1 -join (C $DIM ' | ')) }
-if ($l2.Count) { $lines += ($l2 -join (C $DIM "$segGap$segSep$segGap")) }
+if ($l1.Count) { $lines += $railPrefix + ($l1 -join (C $DIM ' | ')) }
+if ($l2.Count) { $lines += $railPrefix + ($l2 -join (C $DIM "$segGap$segSep$segGap")) }
 [Console]::Write($lines -join "`n")
