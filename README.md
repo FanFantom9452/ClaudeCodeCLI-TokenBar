@@ -457,3 +457,16 @@ WORD_COLORS="review:draft=60 review:ready=75 review:blocked=196"
 
 Keep the four tiers in the hashtable even when every word is spelled out: a plugin
 that grows a mode you haven't coloured yet still has to render.
+
+**fankeel is built in.** Its seven pipeline stages — `survey` `design` `plan`
+`build` `verify` `audit` `land`, plus `clash` — ship with a palette in both
+ports, so there is nothing to set up. A palette written into `tokenbar-config`
+is frozen the day it is written, because the updater never touches that file:
+when fankeel grew a seventh stage, every hand-written copy was one short, and
+a stage with no colour reads as a broken badge rather than as a stage without
+a colour. Anything that ships here reaches the machines already running it.
+
+Naming even one word for a plugin replaces its whole set — the hashtable
+assignment in PowerShell, the `WORD_COLORS` string in the shell build. Override
+fankeel and you are carrying all eight of its words yourself, including the ones
+it has not added yet.
