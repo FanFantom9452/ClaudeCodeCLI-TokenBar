@@ -108,6 +108,23 @@ $badgeColors = @{
     caveman  = @{ off = 240; lite = 137; full = 172; ultra = 208 }   # gray -> tan -> orange -> bright orange
     ponytail = @{ off = 240; lite =  65; full = 108; ultra =  84 }   # gray -> dim sage -> sage -> bright mint
     default  = @{ off = 240; lite = 245; full = 250; ultra = 255 }   # gray -> ... -> white
+    # fankeel writes a pipeline stage rather than a level, so the four tiers have
+    # nothing to say about it and the seven stage words carry the colour instead.
+    #
+    # Shipped here rather than left to tokenbar-config.ps1 because a palette written
+    # there is frozen the day it is written: the config is never touched by the
+    # updater, so the day the plugin grew a seventh stage every hand-written palette
+    # was one short -- and a stage with no colour does not read as a stage without a
+    # colour, it reads as the badge having broken.
+    #
+    # A ramp rather than a wheel: indigo through blue to cyan, so the line warms as
+    # the task moves along its route and the direction is legible without reading
+    # the word. The four tiers stay neutral, so a word that is not one of the seven
+    # is not painted as though it were.
+    fankeel  = @{ off = 240; lite = 245; full  = 250; ultra = 255
+                  survey =  60; design = 62; plan  = 67; build = 68
+                  verify =  75; audit  = 78; land  = 81
+                  clash  = 196 }                                     # the collision, and only that
 }
 # Modes each known plugin can legitimately be in. An unlisted name is validated on
 # shape alone, which is all it takes to keep escapes and control bytes off the line.

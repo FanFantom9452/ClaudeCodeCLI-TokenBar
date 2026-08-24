@@ -220,6 +220,10 @@ fi
 # is what keeps these tags invisible for people who don't use the plugins.
 CAVEMAN_COLORS="240 137 172 208"    # off / lite / full / ultra
 PONYTAIL_COLORS="240 65 108 84"     # off / lite / full / ultra
+# fankeel writes a pipeline stage, not a level, so its colour comes from the word
+# list below and these four stay neutral: a word that is not one of the seven
+# stages should not be painted as though it were.
+FANKEEL_COLORS="240 245 250 255"    # off / lite / full / ultra
 # For any toggle this script has never heard of. Adding one is meant to cost nothing
 # here: drop a flag file in modes/<session_id>/ and it renders. Give it a case below
 # only when you want it off the neutral ramp and onto its own hue.
@@ -229,6 +233,7 @@ colors_for() {
     case "$1" in
         caveman)  printf '%s' "$CAVEMAN_COLORS" ;;
         ponytail) printf '%s' "$PONYTAIL_COLORS" ;;
+        fankeel)  printf '%s' "$FANKEEL_COLORS" ;;
         *)        printf '%s' "$DEFAULT_COLORS" ;;
     esac
 }
@@ -243,7 +248,19 @@ colors_for() {
 # was sourced there rather than to overwrite it:
 #
 #   WORD_COLORS="review:draft=60 review:ready=75 review:blocked=196"
-WORD_COLORS="${WORD_COLORS:-}"
+#
+# fankeel's seven stages ship as the default rather than being left to the config,
+# because a palette written into tokenbar-config.sh is frozen the day it is written
+# -- the updater never touches that file, so the day the plugin grew a seventh
+# stage every hand-written palette was one short, and a stage with no colour does
+# not read as a stage without a colour: it reads as the badge having broken.
+#
+# A ramp rather than a wheel: indigo through blue to cyan, so the line warms as the
+# task moves along its route. Identical to the PowerShell port's $badgeColors.fankeel.
+#
+# Setting WORD_COLORS in the config replaces this whole list, the same way setting
+# $badgeColors.fankeel replaces the hash over there. Keep the seven if you add to it.
+WORD_COLORS="${WORD_COLORS:-fankeel:survey=60 fankeel:design=62 fankeel:plan=67 fankeel:build=68 fankeel:verify=75 fankeel:audit=78 fankeel:land=81 fankeel:clash=196}"
 
 # ---- the lead line --------------------------------------------------------
 #
