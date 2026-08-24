@@ -90,7 +90,15 @@ $BOOM  = [char]::ConvertFromUtf32(0x1F4A5)
 #
 # The colour comes from that plugin's own palette, keyed by `word` — the same
 # lookup a badge does, so a stage ramp configured once serves both.
-$leadPlugin = ''          # e.g. 'review'; empty means no lead line at all
+$leadPlugin = 'auto'      # 'auto'  -> the one plugin that wrote a .lead this session
+                          # ''      -> no lead line, whatever anyone wrote
+                          # 'review' -> that plugin, named outright
+#
+# 'auto' is the default because the alternative is a setting that can only be
+# turned on by hand, in a file the updater never touches. A plugin can ship a
+# palette to every machine through this script; it has no way at all to ship a
+# line in tokenbar-config, so a lead line nobody switched on is a feature that
+# renders on the author's machine and nowhere else.
 $leadStyle  = 'bar'       # 'bar'  -> |NAME WORD ...
                           # 'badge' -> [NAME:WORD] ...
 # 60 because everything else on the line is fixed or short: the tag and dots
@@ -554,6 +562,25 @@ function PadCells([string]$s, [int]$cells) {
 # Refuses a reparse point and anything over 1KB, takes at most the first twelve
 # lines, and strips every C0 and C1 byte from every value — an ESC reaching the
 # terminal from here would let a file rewrite the whole statusline.
+# Which plugin owns the line, when the config did not say. Exactly one .lead file
+# is unambiguous. None means nobody is claiming it; several mean two plugins are,
+# and picking between them would put one on a line the other cannot see it lost --
+# so both of those render nothing, which is what an unset $leadPlugin did before.
+function SoleLead($claudeDir, $sessionId) {
+    try {
+        if ($sessionId -notmatch '^[0-9a-fA-F][0-9a-fA-F-]{7,63}$') { return '' }
+        $dir = Join-Path (Join-Path $claudeDir 'modes') $sessionId
+        if (-not (Test-Path -LiteralPath $dir)) { return '' }
+        $found = @(Get-ChildItem -LiteralPath $dir -Filter '*.lead' -File -ErrorAction SilentlyContinue)
+        if ($found.Count -ne 1) { return '' }
+        $n = [System.IO.Path]::GetFileNameWithoutExtension($found[0].Name)
+        # The same shape ReadLead demands, checked here too: this name is about to
+        # be built into a path and printed.
+        if ($n -notmatch '^[a-z0-9][a-z0-9-]{0,31}$') { return '' }
+        return $n
+    } catch { return '' }
+}
+
 function ReadLead($claudeDir, $sessionId, $name) {
     if ($sessionId -notmatch '^[0-9a-fA-F][0-9a-fA-F-]{7,63}$') { return $null }
     if ($name -notmatch '^[a-z0-9][a-z0-9-]{0,31}$') { return $null }
@@ -720,6 +747,8 @@ $l1 = @()
 # never reshuffles between renders just because a flag file was touched.
 # Read before the badges, because whether the lead line renders decides whether
 # its owner still gets one.
+# Resolved here and not at the top, because 'auto' needs the session id.
+if ($leadPlugin -eq 'auto') { $leadPlugin = SoleLead $ClaudeDir ([string]$j.session_id) }
 $leadData = if ($leadPlugin -and $j.session_id) { ReadLead $ClaudeDir ([string]$j.session_id) $leadPlugin } else { $null }
 $leadShown = [bool]$leadData
 

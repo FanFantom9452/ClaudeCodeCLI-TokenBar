@@ -275,7 +275,15 @@ WORD_COLORS="${WORD_COLORS:-fankeel:survey=60 fankeel:design=62 fankeel:plan=67 
 #
 # The colour comes from that plugin's own palette, keyed by the word, which is
 # the lookup a badge already does.
-LEAD_PLUGIN="${LEAD_PLUGIN:-}"      # e.g. review; empty means no lead line
+LEAD_PLUGIN="${LEAD_PLUGIN-auto}"   # auto   -> the one plugin that wrote a .lead
+                                    # empty  -> no lead line, whatever anyone wrote
+                                    # review -> that plugin, named outright
+#
+# auto is the default because the alternative is a setting that can only be turned
+# on by hand, in a file the updater never touches. A plugin can ship a palette to
+# every machine through this script; it has no way at all to ship a line into
+# tokenbar-config, so a lead line nobody switched on renders on the author's
+# machine and nowhere else.
 LEAD_STYLE="${LEAD_STYLE:-bar}"     # bar   ->  |NAME WORD ...
                                     # badge -> [NAME:WORD] ...
 # 60 because everything else on the line is fixed or short: the tag and dots
@@ -518,6 +526,30 @@ modedir=""
 if [ -n "$sid" ] && [ ${#sid} -le 64 ] &&
    [ "$(printf '%s' "$sid" | tr -cd '0-9a-fA-F-')" = "$sid" ]; then
     [ -d "$CFG/modes/$sid" ] && modedir="$CFG/modes/$sid"
+fi
+
+# Which plugin owns the line, when the config did not say. Exactly one .lead file
+# is unambiguous. None means nobody is claiming it; several mean two plugins are,
+# and picking between them would put one on a line the other cannot see it lost --
+# so both of those render nothing, which is what an empty LEAD_PLUGIN did before.
+if [ "$LEAD_PLUGIN" = auto ]; then
+    LEAD_PLUGIN=""
+    if [ -n "$modedir" ]; then
+        _n=0; _sole=""
+        for _f in "$modedir"/*.lead; do
+            [ -f "$_f" ] || continue
+            _n=$((_n + 1)); _sole="$_f"
+        done
+        if [ "$_n" = 1 ]; then
+            _sole=${_sole##*/}; _sole=${_sole%.lead}
+            # The same shape build_lead demands, checked here too: this name is
+            # about to be built into a path and printed.
+            case "$_sole" in
+                *[!a-z0-9-]*|-*|'') ;;
+                *) [ ${#_sole} -le 32 ] && LEAD_PLUGIN="$_sole" ;;
+            esac
+        fi
+    fi
 fi
 
 # Before the badges, because whether the lead line renders decides whether its

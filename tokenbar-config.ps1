@@ -200,14 +200,15 @@
 #                          draft = 60; ready = 75; blocked = 196 }
 
 # ---- the lead line -------------------------------------------------------
-# An optional third line above everything, owned by one plugin. Nothing renders
-# unless $leadPlugin names one AND that plugin has written
-# modes/<session_id>/<name>.lead, so leaving this empty costs one Test-Path.
+# A third line above everything, owned by one plugin. The default is 'auto': the
+# one plugin that has written modes/<session_id>/<name>.lead this session gets the
+# line, and none or several render nothing. Set it only to override that -- a name
+# to pin one plugin, or '' to have no lead line at all.
 #
 # The colour comes from that plugin's own palette below, keyed by the word, so a
 # stage ramp configured once serves both the lead line and the badge. A plugin
 # that owns the lead line does not also get a badge on line 1.
 #
-# $leadPlugin = 'review'
+# $leadPlugin = 'review'   # 'auto' is the default; '' is off
 # $leadStyle  = 'bar'     # bar -> |REVIEW DRAFT ... ; badge -> [REVIEW:DRAFT] ...
 # $leadTitle  = 60        # cells the title column occupies; longer titles are cut

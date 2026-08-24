@@ -272,18 +272,26 @@ When the palette names a `clash` colour and the plugin writes `others`, that
 colour takes **the rail on all three rows** while the word keeps its own. The
 alarm is the rail; the word is still the answer to *how far along is this*.
 
-Nothing appears unless you name a plugin **and** that plugin has written a lead
-file. Name one in your config:
+**You do not have to name a plugin.** Since v1.4.1 the default is `auto`: if
+exactly one plugin has written a lead file for this session, it gets the line.
+None and several both render nothing — two plugins claiming it would mean picking
+one, and the other has no way to see it lost.
+
+That is the default because the alternative was a feature that could only be
+switched on by hand, in the one file the updater never touches, so it rendered on
+the author's machine and nowhere else.
+
+To name one outright, or to turn the line off even when a plugin writes the file:
 
 ```powershell
 # ~/.claude/tokenbar-config.ps1
-$leadPlugin = 'review'
+$leadPlugin = 'review'   # 'auto' is the default; '' turns the line off entirely
 $leadStyle  = 'bar'      # or 'badge' -> [REVIEW:DRAFT] ...
 ```
 
 ```sh
 # ~/.claude/tokenbar-config.sh
-LEAD_PLUGIN=review
+LEAD_PLUGIN=review       # auto is the default; empty turns the line off entirely
 LEAD_STYLE=bar
 ```
 
