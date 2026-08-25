@@ -468,10 +468,13 @@ build_lead() {
     # Filled to the current step, hollow after it, and only when the plugin said
     # how many there are. Inventing a denominator would draw progress out of
     # nothing.
+    #
+    # Zero is a legal step and means all hollow: a plugin that has started and has
+    # not yet chosen a route. A denominator of zero is still nothing to draw.
     step=$(lead_field "$f" step  | tr -cd '0-9')
     steps=$(lead_field "$f" steps | tr -cd '0-9')
     if [ -n "$step" ] && [ -n "$steps" ] && [ "$steps" -ge 1 ] && [ "$steps" -le 12 ] &&
-       [ "$step" -ge 1 ] && [ "$step" -le "$steps" ]; then
+       [ "$step" -ge 0 ] && [ "$step" -le "$steps" ]; then
         dots=""; k=1
         while [ "$k" -le "$steps" ]; do
             if [ "$k" -le "$step" ]; then dots="$dots$ESC[38;5;${color}m●$ESC[0m"

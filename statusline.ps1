@@ -621,11 +621,14 @@ function ReadLead($claudeDir, $sessionId, $name) {
 
 # Filled to the current step, hollow after it. Only when the plugin said how many
 # there are — inventing a denominator would draw a progress bar out of nothing.
+#
+# Zero is a legal step and means all hollow: a plugin that has started and has not
+# yet chosen a route. A denominator of zero is still nothing to draw.
 function StepDots($step, $steps, $colour) {
     $n = 0; $of = 0
     [void][int]::TryParse([string]$step, [ref]$n)
     [void][int]::TryParse([string]$steps, [ref]$of)
-    if ($of -lt 1 -or $of -gt 12 -or $n -lt 1 -or $n -gt $of) { return '' }
+    if ($of -lt 1 -or $of -gt 12 -or $n -lt 0 -or $n -gt $of) { return '' }
     $s = ''
     for ($k = 1; $k -le $of; $k++) {
         $s += if ($k -le $n) { C $colour ([char]0x25CF) } else { C 240 ([char]0x25CB) }
