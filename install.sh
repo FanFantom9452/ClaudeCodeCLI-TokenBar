@@ -32,7 +32,7 @@ fetch_ref() {
         wget -qO- --timeout=15 -U 'ClaudeCodeCLI-TokenBar-installer'             "https://api.github.com/repos/$OWNER/$NAME/releases/latest" 2>/dev/null
     fi
 }
-REF=$(fetch_ref | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*//p' | head -n 1 || true)
+REF=$(fetch_ref | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true)
 [ -z "$REF" ] && REF=main
 REPO="https://raw.githubusercontent.com/$OWNER/$NAME/$REF"
 
