@@ -229,9 +229,10 @@ sh preview.sh                               # Linux / macOS
 
 Renders the real statusline against synthetic payloads across every band — each ctx
 tier swept end to end in 5% steps, the same for 5h, every 7d deviation from -14 to
-+14, the special cases, and four full lines. It runs the *installed* script, so it
-picks your config up exactly as Claude Code would; pass `-Script` / a path argument
-to preview a working copy first.
++14, the special cases, four full lines, and line 1 with an effort level on it. It
+runs the statusline sitting beside it when there is one — so a clone previews its own
+working copy — and the installed script otherwise, and either way it picks your config
+up exactly as Claude Code would; pass `-Script` / a path argument to preview another copy.
 
 Handy because the states you most want to check are the ones you cannot summon on
 demand — nobody wants to burn 90% of a weekly quota to find out whether they like
