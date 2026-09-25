@@ -16,6 +16,7 @@
 # $show.ponytail = $true
 # $show.toggles  = $true
 # $show.model    = $true
+# $show.effort   = $true
 # $show.dir      = $true
 # $show.branch   = $true
 # $show.gitAhead = $true

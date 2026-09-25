@@ -22,6 +22,7 @@ SHOW_CAVEMAN=1     # [CAVEMAN:FULL] badge, if the caveman plugin is installed
 SHOW_PONYTAIL=1    # [PONYTAIL]     badge, if the ponytail plugin is installed
 SHOW_TOGGLES=1     # any other mode flag found in modes/<session_id>/
 SHOW_MODEL=1       # Opus 5
+SHOW_EFFORT=1      # xhigh  reasoning effort, coloured by level
 SHOW_DIR=1         # current directory name
 SHOW_BRANCH=1      # main   (gets a * only when SHOW_GITLINES is off)
 SHOW_GITAHEAD=1    # ↑2 ↓1  commits not pushed / not pulled
@@ -147,7 +148,8 @@ print join("\t",
     stamp(defined $f5 ? $f5->{resets_at} : undef),
     pct($f7),
     stamp(defined $f7 ? $f7->{resets_at} : undef),
-    $j->{session_id} // ""
+    $j->{session_id} // "",
+    $j->{effort}{level} // ""
 ), "\n";
 ') || exit 0
 
@@ -595,7 +597,7 @@ fi
 printf '%s' "$fields" | awk -F'\t' \
     -v esc="$ESC" -v badges="$badges" -v branch="$branch" -v lead="$lead" -v leadrail="$leadrail" \
     -v barw="$BAR_WIDTH" -v gap="$FIELD_GAP" -v seggap="$SEG_GAP" -v segsep="$SEG_SEP" \
-    -v s_model="$SHOW_MODEL" -v s_dir="$SHOW_DIR" -v s_ctx="$SHOW_CONTEXT" \
+    -v s_model="$SHOW_MODEL" -v s_effort="$SHOW_EFFORT" -v s_dir="$SHOW_DIR" -v s_ctx="$SHOW_CONTEXT" \
     -v s_q5="$SHOW_QUOTA5H" -v s_q7="$SHOW_QUOTA7D" -v s_delta="$SHOW_DELTA"     -v ctxtiers="$CTX_TIERS"     -v ctxmarks="$CTX_MARKS" -v ctxmarkmin="$CTX_MARK_MINWINDOW"     -v ramp5h="$RAMP_5H" -v ramp5hmark="$RAMP_5H_MARK"     -v devramp="$DEV_RAMP" -v dev7dpurple="$DEV_7D_PURPLE"     -v devmarks="$DEV_MARKS" -v dev7dunknown="$DEV_7D_UNKNOWN" -v hardstop7d="$HARD_STOP_7D"     -v purplecol="$PURPLE_COL" -v warnglyph="$WARN_GLYPH" '
 function paint(t)  { return esc "[" (BOLD ? "1;" : "") "38;5;" COL "m" t esc "[0m" }
 function dim(t)    { return esc "[38;5;240m" t esc "[0m" }
@@ -718,6 +720,14 @@ function fmtspan(sec, units,   d, h, m, tot) {
     n1 = 0
     if (badges != "")                       l1[++n1] = badges
     if (s_model == "1" && model != "")      l1[++n1] = tint(111, model)
+    # Cold to bright in the blue of the model name: warm colours are already
+    # the bar warnings. Absent when the model takes no effort parameter.
+    # (No apostrophes in here: this whole awk program sits in single quotes.)
+    effort = $11
+    if (s_effort == "1" && effort != "") {
+        ec = (effort == "low") ? 67 : (effort == "medium") ? 74 : (effort == "xhigh") ? 117 : (effort == "max") ? 159 : 111
+        l1[++n1] = (effort == "max") ? esc "[1;38;5;" ec "m" effort esc "[0m" : tint(ec, effort)
+    }
     if (s_dir == "1" && dir != "") {
         base = dir; sub(/\/+$/, "", base); sub(/^.*\//, "", base)
         if (base != "") l1[++n1] = tint(245, base)

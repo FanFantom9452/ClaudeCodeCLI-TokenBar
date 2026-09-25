@@ -3,7 +3,7 @@
 Two-line Claude Code statusline. Context window and account quota as usage bars.
 
 ```
-[CAVEMAN:FULL] | [PONYTAIL:FULL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
+[CAVEMAN:FULL] | [PONYTAIL:FULL] | Opus 5 | xhigh | my-project | main ↑2 +42/-7 ?1
 ctx ███▊░░░░░░  38%  │  5h ██████▌░░░  66%  ↻ 1h 46m  │  7d █████▊░░░░  58%  ↻ 2d 12h 30m   -6%
 ```
 
@@ -237,7 +237,7 @@ Handy because the states you most want to check are the ones you cannot summon o
 demand — nobody wants to burn 90% of a weekly quota to find out whether they like
 the colour.
 
-Segments: `caveman` `ponytail` `toggles` `model` `dir` `branch` `gitAhead` `gitLines`
+Segments: `caveman` `ponytail` `toggles` `model` `effort` `dir` `branch` `gitAhead` `gitLines`
 `gitUntrk` `context` `quota5h` `quota7d` `delta`
 (shell script uses the same names as `SHOW_CAVEMAN`, `SHOW_GITLINES`, …)
 
@@ -257,7 +257,7 @@ So one plugin may claim a line above everything:
 
 ```
 ▌REVIEW DRAFT   ●●●○○  ⚿ ask  ⚑2  src/render  rework the deviation ramp
-▌ [CAVEMAN:FULL] | Opus 5 | my-project | main ↑2 +42/-7 ?1
+▌ [CAVEMAN:FULL] | Opus 5 | xhigh | my-project | main ↑2 +42/-7 ?1
 ▌ ctx ███▊░░░░░░  38%  │  5h ██████▌░░░  66%  ↻ 1h 46m  │  7d █████▊░░░░  58%
 ```
 

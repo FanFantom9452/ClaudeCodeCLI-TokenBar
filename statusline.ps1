@@ -21,6 +21,7 @@ $show = @{
     ponytail  = $true    # [PONYTAIL]     badge, if the ponytail plugin is installed
     toggles   = $true    # any other mode flag found in modes/<session_id>/
     model     = $true    # Opus 5
+    effort    = $true    # xhigh  reasoning effort, coloured by level
     dir       = $true    # current directory name
     branch    = $true    # main   (gets a * only when gitLines is off)
     gitAhead  = $true    # ↑2 ↓1  commits not pushed / not pulled
@@ -50,6 +51,11 @@ $segSep   = [char]0x2502 # what sits between two bars. A rule with vertical exte
 # rules can be compared and the worse one wins.
 $RED = 196; $PURPLE = 201
 $CTRACK = 240; $DIM = 240
+
+# Effort runs cold to bright in the blue of the model name beside it. Warm colours
+# are already the bars' warnings, and an orange xhigh would read as a quota alarm.
+# A level not listed here renders in the model's own 111.
+$effortColor = @{ low = 67; medium = 74; high = 111; xhigh = 117; max = 159 }
 
 # Alert glyphs. ConvertFromUtf32, never a [char] cast: both emoji sit above the BMP
 # so they are surrogate pairs, and [char] holds 16 bits and throws on them. They are
@@ -776,6 +782,14 @@ foreach ($n in $order) {
 if ($null -eq $j) { $l1 += C $RED 'no payload' }
 
 if ($show.model -and $j.model.display_name) { $l1 += C 111 $j.model.display_name }
+
+# effort is absent from the payload when the model takes no effort parameter, so
+# the segment goes with it rather than guessing a level.
+$effort = $j.effort.level
+if ($show.effort -and $effort) {
+    $ec = if ($effortColor.ContainsKey($effort)) { $effortColor[$effort] } else { 111 }
+    $l1 += if ($effort -eq 'max') { Bold $ec $effort } else { C $ec $effort }
+}
 
 $dir = if ($j.workspace.current_dir) { $j.workspace.current_dir } else { $j.cwd }
 if ($show.dir -and $dir) { $l1 += C 245 (Split-Path -Leaf $dir) }
