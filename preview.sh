@@ -47,6 +47,12 @@ render() {
     printf '{"cwd":"%s","model":{"id":"claude-opus-5[1m]","display_name":"Opus 5"},"workspace":{"current_dir":"%s"},"context_window":{"context_window_size":%s,"used_percentage":%s}%s}' \
         "$here" "$here" "$_cs" "$_cp" "$_rl" | sh "$SCRIPT" | tail -n 1
 }
+# effort -> line 1 only, where effort sits after the model. Second from the end
+# rather than first, because a lead line, when one is live, prints above it.
+render1() {
+    printf '{"cwd":"%s","model":{"id":"claude-opus-5[1m]","display_name":"Opus 5"},"effort":{"level":"%s"},"workspace":{"current_dir":"%s"},"context_window":{"context_window_size":200000,"used_percentage":10}}' \
+        "$here" "$1" "$here" | sh "$SCRIPT" | tail -n 2 | head -n 1
+}
 row()  { printf '  %-22s %s\n' "$1" "$(shift; echo "$@")"; }
 head_() { printf '\n%s[1m  %s%s[0m\n\n' "$ESC" "$1" "$ESC"; }
 
@@ -86,4 +92,7 @@ printf '  %-22s %s\n' 'quiet'    "$(render 1000000 22 30 25 2)"
 printf '  %-22s %s\n' 'mid-week' "$(render 1000000 48 66 58 -6)"
 printf '  %-22s %s\n' 'pressed'  "$(render 1000000 72 88 71 15)"
 printf '  %-22s %s\n' 'critical' "$(render 1000000 93 97 96 8)"
+
+head_ 'line 1 - model and effort'
+printf '  %-22s %s\n' 'effort xhigh' "$(render1 xhigh)"
 printf '\n'

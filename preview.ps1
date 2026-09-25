@@ -36,13 +36,17 @@ $root = $PSScriptRoot
 # most of a second, so they are all built first and then run concurrently — the
 # difference between a preview you re-run while tweaking and one you avoid.
 $samples = New-Object System.Collections.ArrayList
-function Add-Sample($section, $label, $note, $ctxSize, $ctxPct, $q5, $q7, $dev) {
+function Add-Sample($section, $label, $note, $ctxSize, $ctxPct, $q5, $q7, $dev, $effort) {
     $body = @{
         cwd = $root
         model = @{ id = 'claude-opus-5[1m]'; display_name = 'Opus 5' }
         workspace = @{ current_dir = $root }
         context_window = @{ context_window_size = $ctxSize; used_percentage = $ctxPct }
     }
+    # An effort sample shows line 1, where effort sits after the model: second from
+    # the end rather than first, because a lead line, when one is live, prints above it.
+    $pick = -1
+    if ($effort) { $body.effort = @{ level = $effort }; $pick = -2 }
     $rl = @{}
     if ($null -ne $q5) {
         $rl.five_hour = @{ used_percentage = $q5; resets_at = [datetime]::UtcNow.AddMinutes(106).ToString('o') }
@@ -55,7 +59,7 @@ function Add-Sample($section, $label, $note, $ctxSize, $ctxPct, $q5, $q7, $dev) 
     }
     if ($rl.Count) { $body.rate_limits = $rl }
     [void]$samples.Add([pscustomobject]@{
-        i = $samples.Count; section = $section; label = $label; note = $note
+        i = $samples.Count; section = $section; label = $label; note = $note; pick = $pick
         json = ($body | ConvertTo-Json -Depth 10 -Compress)
     })
 }
@@ -97,6 +101,7 @@ Add-Sample 'full line' 'quiet'    '' 1000000 22 30 25   2
 Add-Sample 'full line' 'mid-week' '' 1000000 48 66 58  -6
 Add-Sample 'full line' 'pressed'  '' 1000000 72 88 71  15
 Add-Sample 'full line' 'critical' '' 1000000 93 97 96   8
+Add-Sample 'line 1  model and effort' 'effort xhigh' '' 200000 10 $null $null 0 'xhigh'
 
 Write-Host ''
 Write-Host " script  : $Script"
@@ -114,12 +119,12 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
     $done = $samples | ForEach-Object -ThrottleLimit $Throttle -Parallel {
         $s = $_
         $out = $s.json | & $using:exe -NoProfile -ExecutionPolicy Bypass -File $using:Script
-        [pscustomobject]@{ i = $s.i; text = (($out -split "`n")[-1]) }
+        [pscustomobject]@{ i = $s.i; text = (($out -split "`n")[$s.pick]) }
     } | Sort-Object i
 } else {
     $done = $samples | ForEach-Object {
         $out = $_.json | & $exe -NoProfile -ExecutionPolicy Bypass -File $Script
-        [pscustomobject]@{ i = $_.i; text = (($out -split "`n")[-1]) }
+        [pscustomobject]@{ i = $_.i; text = (($out -split "`n")[$_.pick]) }
     }
 }
 $text = @{}
