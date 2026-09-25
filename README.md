@@ -241,6 +241,12 @@ Segments: `caveman` `ponytail` `toggles` `model` `effort` `dir` `branch` `gitAhe
 `gitUntrk` `context` `quota5h` `quota7d` `delta`
 (shell script uses the same names as `SHOW_CAVEMAN`, `SHOW_GITLINES`, …)
 
+`effort` sits right after the model name and runs cold to bright in that same blue:
+low `67`, medium `74`, high `111`, xhigh `117`, max `159` (bold). Warm colours are
+already the bars' warnings, so effort is never given one. It renders nothing for a
+model that takes no effort parameter, and it toggles like any other segment, with
+`effort` / `SHOW_EFFORT`.
+
 Every git segment hides itself when there's nothing to say, so a clean tree on an
 up-to-date branch renders as just `main`. Turn `gitLines` off and the old `main*`
 dirty marker comes back instead.
@@ -302,11 +308,11 @@ no space on the line:
 | Key | |
 |---|---|
 | `word` | required. The state, `[a-z0-9-]`, at most 16 characters. Colours the line, via the same palette entry a badge would use. |
-| `step` / `steps` | position in a sequence, drawn as `●●●○○`. Both or neither — a denominator invented here would be a progress bar made of nothing. |
+| `step` / `steps` | position in a sequence, drawn as `●●●○○`. Both or neither — a denominator invented here would be a progress bar made of nothing. `step=0` still draws — all-hollow, `○○○○○` — that is step zero, not nothing. |
 | `guard` | one lowercase word, rendered `⚿ ask`. |
 | `others` | a count, rendered `⚑2`. Omit it rather than writing `0`. Also turns the rail the palette's `clash` colour, if it has one. |
 | `where` | which files or directory. Cut at 40 cells. |
-| `title` | what is being worked on. Last on the line and cut at `$leadTitle` cells. |
+| `title` | what is being worked on. Last on the line and cut at `$leadTitle` cells (`LEAD_TITLE` in the shell script), which defaults to 60 cells. |
 
 The order is by how often a field changes, and the title is last on purpose. It
 used to sit in the middle, padded to a fixed column so renaming the task did not
